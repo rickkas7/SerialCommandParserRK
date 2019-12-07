@@ -18,11 +18,14 @@ It can also run in interactive terminal mode with ANSI terminal programs (includ
   - Ctrl-E Move cursor to end of line (End)
   - Ctrl-F Move cursor forward (right arrow)
   - Ctrl-H Delete previous character (backspace)
+  - Ctrl-I Command completion (tab)
   - Ctrl-K Clear content after cursor
   - Ctrl-L Clear screen
   - Ctrl-N Next Command (down arrow)
   - Ctrl-P Previous Command (up arrow)
+- Smart mixing of LogHandler and editing output (optional)
 
 Some future useful features might include:
 
 - Command option processing
+

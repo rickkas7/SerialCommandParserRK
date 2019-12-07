@@ -19,11 +19,24 @@ void setup() {
 		.setup();
 
 	commandParser.addCommandHandler("test", "test command", [](SerialCommandParserBase *) {
-		Serial.println("got test command!");
+		commandParser.printMessageNoPrompt("got test command!");
 		for(size_t ii = 0; ii < commandParser.getArgsCount(); ii++) {
-			Serial.printlnf("arg %u: '%s'", ii, commandParser.getArgString(ii));
+			commandParser.printMessageNoPrompt("  arg %u: '%s'", ii, commandParser.getArgString(ii));
 		}
+		commandParser.printMessagePrompt();
 	});
+
+	commandParser.addCommandHandler("foo", "foo command", [](SerialCommandParserBase *) {
+		commandParser.printMessage("got foo command!");
+	});
+
+	commandParser.addCommandHandler("aaaa", "aaaa command", [](SerialCommandParserBase *) {
+		commandParser.printMessage("got aaaa command!");
+	});
+	commandParser.addCommandHandler("aaabbbb", "aaabbbb command", [](SerialCommandParserBase *) {
+		commandParser.printMessage("got aaabbbb command!");
+	});
+
 	commandParser.addHelpCommand();
 }
 

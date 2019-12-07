@@ -1,6 +1,30 @@
 #include "SerialCommandParserRK.h"
 
+
 #include <string.h> // strtok_s
+
+// Define the debug logging level here
+// 0 = Off
+// 1 = Normal
+// 2 = High
+#define SERIAL_COMMAND_DEBUG_LEVEL 0
+
+// Don't change these, just change the debugging level above
+#if SERIAL_COMMAND_DEBUG_LEVEL >= 1
+static Logger log("app.sercmd");
+
+#define DEBUG_NORMAL(x) log.info x
+#else
+#define DEBUG_NORMAL(x)
+#endif
+
+#if SERIAL_COMMAND_DEBUG_LEVEL >= 2
+#define DEBUG_HIGH(x) log.info x
+#else
+#define DEBUG_HIGH(x)
+#endif
+
+
 
 SerialCommandParserBase::SerialCommandParserBase(char *buffer, size_t bufferSize, char **argsBuffer, size_t argsBufferSize) :
 	buffer(buffer), bufferSize(bufferSize), argsBuffer(argsBuffer), argsBufferSize(argsBufferSize) {
@@ -179,7 +203,7 @@ void SerialCommandParserBase::processLine() {
 		}
 	}
 	if (!handled && !commandHandlers.empty()) {
-		Log.info("unknown command '%s'", getArgString(0));
+		DEBUG_HIGH(("unknown command '%s'", getArgString(0)));
 		printHelp();
 	}
 	handlePrompt();
@@ -217,20 +241,26 @@ void SerialCommandParserBase::handleWelcome() {
 }
 
 
-void SerialCommandParserBase::printWithNewLine(const char *str, bool endWithNewLine) {
+size_t SerialCommandParserBase::printWithNewLine(const char *str, bool endWithNewLine) {
 	const char *cp = str;
 	char last = 0;
+	size_t numLines = 0;
 
 	while(*cp) {
 		if (*cp == '\n' && last != '\r') {
 			print('\r');
+		}
+		if (*cp == '\n') {
+			numLines++;
 		}
 		print(*cp);
 		last = *cp++;
 	}
 	if (endWithNewLine && last != '\n') {
 		println("");
+		numLines++;
 	}
+	return numLines;
 }
 
 bool SerialCommandParserBase::handleRawLine() {
@@ -344,6 +374,17 @@ float SerialCommandParserBase::getArgFloat(size_t index) const {
 	return atof(getArgString(index));
 }
 
+char SerialCommandParserBase::getArgChar(size_t index, char defaultValue) const {
+	String s = getArgString(index);
+	if (s.length() > 0) {
+		return s[0];
+	}
+	else {
+		return defaultValue;
+	}
+}
+
+
 void SerialCommandParserBase::addCommandHandler(const char *cmdNames, const char *helpStr, std::function<void(SerialCommandParserBase *parser)> handler) {
 
 	std::vector<String> cmdNamesVector;
@@ -409,6 +450,22 @@ SerialCommandEditorBase::~SerialCommandEditorBase() {
 
 }
 
+/**
+ * @brief Clear the data in the processor
+ *
+ * You normal don't need to call this as it's cleared after processing a command. This is
+ * used during unit testing.
+ */
+void SerialCommandEditorBase::clear() {
+	SerialCommandParserBase::clear();
+	cursorPos = 0;
+	horizScroll = 0;
+	promptRendered = false;
+}
+
+
+
+
 void SerialCommandEditorBase::handleConnected(bool isConnected) {
 	getScreenSize();
 }
@@ -441,13 +498,13 @@ void SerialCommandEditorBase::loop() {
 	// Check for escape
 	if ((keyEscapeOffset == 1) && (millis() - lastKeyMillis > 10)) {
 		// Got an ESC but did not get a [ right away, so it's probably someone hitting the ESC key
-		// Log.info("esc timed out");
+		DEBUG_HIGH(("esc timed out"));
 		handleSpecialKey(KEY_ESC);
 		keyEscapeOffset = 0;
 	}
 	if (startScreenSizeMillis != 0 && millis() - startScreenSizeMillis > 500) {
 		// Terminal did not respond with a screen size. Set at 80x24.
-		// Log.info("didn't get screen size");
+		DEBUG_HIGH(("didn't get screen size"));
 		startScreenSizeMillis = 0;
 		terminalType = TerminalType::DUMB;
 		startEditing();
@@ -460,6 +517,8 @@ void SerialCommandEditorBase::loop() {
 void SerialCommandEditorBase::filterChar(char c) {
 	// Log.trace("char %c %d", c, c);
 	lastKeyMillis = millis();
+
+	promptRendered = false;
 
 	if (c == KEY_ESC && keyEscapeOffset == 0) {
 		keyEscapeBuf[keyEscapeOffset++] = c;
@@ -481,7 +540,7 @@ void SerialCommandEditorBase::filterChar(char c) {
 			}
 			else {
 				// Send the ESC and also the key that was just pressed and clear ESC mode.
-				// Log.info("esc not CSI");
+				DEBUG_HIGH(("esc not CSI"));
 				handleSpecialKey(KEY_ESC);
 				processChar(c);
 				keyEscapeOffset = 0;
@@ -491,7 +550,7 @@ void SerialCommandEditorBase::filterChar(char c) {
 		case 2:
 			if (c >= 'A' && c <= 'Z') {
 				// Single character xterm sequences
-				// Log.info("got xterm  key %c", c);
+				DEBUG_HIGH(("got xterm  key %c", c));
 				switch(c) {
 				case 'A':
 					handleSpecialKey(KEY_UP);
@@ -526,7 +585,7 @@ void SerialCommandEditorBase::filterChar(char c) {
 			if (keyEscapeOffset == 3) {
 				if (keyEscapeBuf[2] >= '1' && keyEscapeBuf[2] < '9' && c >= 'A' && c <= 'Z') {
 					// xterm with modifier or a function key. Not currently supported.
-					// Log.info("got xterm function key %c", c);
+					DEBUG_HIGH(("got xterm function key %c", c));
 
 					keyEscapeOffset = 0;
 					break;
@@ -550,7 +609,7 @@ void SerialCommandEditorBase::filterChar(char c) {
 					n2 = atoi(&semiColon[1]);
 				}
 				if (c == 'R') {
-					// Log.info("got DSR rows=%d cols=%d", n1, n2);
+					DEBUG_HIGH(("got DSR rows=%d cols=%d", n1, n2));
 					if (gettingScreenSize) {
 						gettingScreenSize = false;
 						terminalType = TerminalType::ANSI;
@@ -567,7 +626,7 @@ void SerialCommandEditorBase::filterChar(char c) {
 					}
 				}
 				else {
-					// Log.info("got ansi n1=%d n2=%d", n1, n2);
+					DEBUG_HIGH(("got ansi n1=%d n2=%d", n1, n2));
 					switch(n1) {
 					case 1:
 					case 7:
@@ -626,33 +685,106 @@ void SerialCommandEditorBase::startEditing() {
 }
 
 void SerialCommandEditorBase::handlePrompt() {
+	handlePromptWithCallback(0);
+}
+
+void SerialCommandEditorBase::handlePromptWithCallback(std::function<void()> handlePromptCallback) {
+	if (promptRendered) {
+		return;
+	}
+	promptRendered = true;
+
 	// Call base class
 	SerialCommandParserBase::handlePrompt();
 
 	// Get the cursor position
 	if (terminalType == TerminalType::ANSI) {
-		getCursorPosition([this](int row, int col) {
+		getCursorPosition([this,handlePromptCallback](int row, int col) {
 			editRow = row;
 			editCol = col;
-			cursorPos = 0;
-			horizScroll = 0;
 
-			// Log.info("prompt editRow=%d editCol=%d", editRow, editCol);
+			DEBUG_HIGH(("prompt editRow=%d editCol=%d", editRow, editCol));
 
 			eraseToEndOfLine();
 
-			// Testing: The cursor position is not changing on screen for some reason,
-			// try explicitly setting it again
-			setCursorPosition(row, col);
+			if (handlePromptCallback) {
+				handlePromptCallback();
+			}
 		});
 	}
+	else {
+		if (handlePromptCallback) {
+			handlePromptCallback();
+		}
+	}
 }
+
+void SerialCommandEditorBase::handleCompletion() {
+	// This null-terminates buffer
+	char *cp = getBuffer();
+
+	// Only do completion if we are at the end of the buffer and it has no spaces (command completion only for now)
+	if (cursorPos != (int)bufferOffset || strchr(cp, ' ') != 0) {
+		return;
+	}
+
+	// Looks like we can try completion
+
+	std::vector<String> possibleMatches;
+
+	for(CommandHandlerInfo *chi : commandHandlers) {
+		for(String s : chi->cmdNames) {
+			if (strncmp(s, buffer, bufferOffset) == 0) {
+				possibleMatches.push_back(s);
+			}
+		}
+	}
+
+	if (possibleMatches.size() == 0) {
+		// No matches
+		print(KEY_CTRL_G); // bell
+		return;
+	}
+	else
+	if (possibleMatches.size() == 1) {
+		// Exactly one match, match the whole thing
+		setBuffer(possibleMatches[0], true);
+	}
+	else {
+		// Otherwise, find the longest match and only fill that much
+		for(size_t ii = bufferOffset; ; ii++) {
+			bool matchedAll = true;
+			String s1;
+			for(String s : possibleMatches) {
+				if (s1.length() == 0) {
+					s1 = s;
+				}
+				else {
+					if (strncmp(s1, s, ii) != 0) {
+						DEBUG_HIGH(("did not match s1=%s s=%s", s1.c_str(), s.c_str()));
+						matchedAll = false;
+						break;
+					}
+				}
+			}
+			if (!matchedAll) {
+				// Only match up to ii - 1 characters
+				setBuffer(s1.substring(0, ii - 1), true);
+				DEBUG_HIGH(("matching up to %u: %s", ii - 1, buffer));
+				print(KEY_CTRL_G); // bell
+				break;
+			}
+		}
+	}
+}
+
+
 
 void SerialCommandEditorBase::handleSpecialKey(char key) {
 	if (terminalType == TerminalType::UNKNOWN) {
 		if ((key == KEY_CR || key == KEY_LF || key == KEY_CTRL_L) && bufferOffset == 0 && screenRows == 0 && screenCols == 0) {
 			// Hitting return with an unknown terminal type starts detection
-			// Log.info("trying screen size");
+			DEBUG_HIGH(("trying screen size"));
 			getScreenSize();
 		}
 	}
@@ -661,7 +793,7 @@ void SerialCommandEditorBase::handleSpecialKey(char key) {
 		return;
 	}
 
-	// Log.info("special key %d", key);
+	DEBUG_HIGH(("special key %d", key));
 	switch(key) {
 
 	case KEY_CTRL_A:
@@ -678,7 +810,7 @@ void SerialCommandEditorBase::handleSpecialKey(char key) {
 		if (cursorPos > 0) {
 			deleteCharacterLeft(cursorPos);
 			cursorPos--;
-			scrollToView(ScrollView::VISIBLE, false);
+			scrollToView(ScrollView::VISIBLE, true);
 		}
 		break;
 
@@ -712,11 +844,16 @@ void SerialCommandEditorBase::handleSpecialKey(char key) {
 		}
 		break;
 
+	case KEY_TAB:
+		handleCompletion();
+		break;
+
 	case KEY_CTRL_L:
 		setCursorPosition(1, 1);
 		eraseScreen();
-		handlePrompt();
-		redraw(horizScroll);
+		handlePromptWithCallback([this]() {
+			redraw(horizScroll);
+		});
 		break;
 
 	case KEY_CTRL_K:
@@ -765,6 +902,9 @@ void SerialCommandEditorBase::handleSpecialKey(char key) {
 		// Terminate the buffer and move to the next line
 		buffer[bufferOffset] = 0;
 		println("");
+		if (editRow < screenRows) {
+			editRow++;
+		}
 
 		// Save the line in history
 		historyAdd(buffer, false);
@@ -778,7 +918,7 @@ void SerialCommandEditorBase::handleSpecialKey(char key) {
 		break;
 
 	case KEY_FORWARD_DELETE:
-		if (cursorPos < (bufferOffset - 1)) {
+		if (cursorPos < (int)(bufferOffset - 1)) {
 			deleteCharacterAt(cursorPos);
 			scrollToView(ScrollView::VISIBLE, false);
 		}
@@ -788,7 +928,7 @@ void SerialCommandEditorBase::handleSpecialKey(char key) {
 
 }
 
-void SerialCommandEditorBase::setBuffer(const char *str) {
+void SerialCommandEditorBase::setBuffer(const char *str, bool atEnd) {
 	size_t len = strlen(str);
 	if (len < (bufferSize - 1)) {
 		strcpy(buffer, str);
@@ -799,10 +939,12 @@ void SerialCommandEditorBase::setBuffer(const char *str) {
 		buffer[bufferSize - 1] = 0;
 		bufferOffset = bufferSize - 1;
 	}
-	cursorPos = 0;
-	horizScroll = 0;
-	redraw(0);
-	setCursor();
+	if (atEnd) {
+		scrollToView(ScrollView::END, true);
+	}
+	else {
+		scrollToView(ScrollView::HOME, true);
+	}
 }
 
 void SerialCommandEditorBase::processChar(char c) {
@@ -813,11 +955,11 @@ void SerialCommandEditorBase::processChar(char c) {
 	if (cursorPos == (int)bufferOffset) {
 		// Typing at end of the line
 		appendCharacter(c);
-		// Log.info("append %c at %d", c, cursorPos);
+		DEBUG_HIGH(("append %c at %d", c, cursorPos));
 
 		int cursorCol = editCol + (cursorPos - horizScroll);
 		if (cursorCol < (screenCols - 1)) {
-			// Log.info("append %c at cursorPos=%d", c, cursorPos);
+			DEBUG_HIGH(("append %c at cursorPos=%d", c, cursorPos));
 			print(c);
 			cursorPos++;
 		}
@@ -825,13 +967,13 @@ void SerialCommandEditorBase::processChar(char c) {
 			// We're at the rightmost column so we need to scroll instead of just printing and wrapping
 			cursorPos++;
 			horizScroll++;
-			// Log.info("append %c at cursorPos=%d with scroll horizScroll=%d", c, cursorPos, horizScroll);
+			DEBUG_HIGH(("append %c at cursorPos=%d with scroll horizScroll=%d", c, cursorPos, horizScroll));
 			redraw(horizScroll);
 		}
 	}
 	else {
 		// Inserting in the middle of the line
-		// Log.info("insert %c at cursorPos=%d bufferOffset=%d", c, cursorPos, bufferOffset);
+		DEBUG_HIGH(("insert %c at cursorPos=%d bufferOffset=%d", c, cursorPos, bufferOffset));
 		insertCharacterAt(cursorPos, c);
 		redraw(cursorPos++);
 	}
@@ -842,26 +984,24 @@ void SerialCommandEditorBase::scrollToView(ScrollView which, bool forceRedraw) {
 		return;
 	}
 
-	// Log.info("scrollToView which=%d forceRedraw=%d editCol=%d", which, forceRedraw, editCol);
+	DEBUG_HIGH(("scrollToView which=%d forceRedraw=%d editCol=%d", which, forceRedraw, editCol));
 
 	int widthRightOfPrompt = screenCols - editCol;
-
-	if ((int)bufferOffset <= widthRightOfPrompt) {
-		// Fits without scrolling
-		horizScroll = 0;
-		redraw(0);
-		return;
-	}
 
 	switch(which) {
 	case ScrollView::HOME:
 		cursorPos = 0;
 		horizScroll = 0;
 		redraw(0);
+		DEBUG_HIGH(("scrollToView which=HOME cursorPos=%d bufferOffset=%u horizScroll=%d", cursorPos, bufferOffset, horizScroll));
 		break;
 
 	case ScrollView::LEFT_EDGE:
 		horizScroll = cursorPos;
+		if ((int)bufferOffset <= widthRightOfPrompt) {
+			horizScroll = 0;
+		}
+
 		if ((horizScroll + widthRightOfPrompt) > (int)bufferOffset) {
 			horizScroll = bufferOffset - widthRightOfPrompt;
 			redraw(horizScroll);
@@ -870,9 +1010,15 @@ void SerialCommandEditorBase::scrollToView(ScrollView which, bool forceRedraw) {
 		if (forceRedraw) {
 			redraw(horizScroll);
 		}
+		DEBUG_HIGH(("scrollToView which=LEFT_EDGE cursorPos=%d bufferOffset=%u horizScroll=%d forceRedraw=%d", cursorPos, bufferOffset, horizScroll, forceRedraw));
 		break;
 
 	case ScrollView::VISIBLE:
+		if ((int)bufferOffset <= widthRightOfPrompt) {
+			horizScroll = 0;
+			DEBUG_HIGH(("scrollToView which=VISIBLE fits without scrolling bufferOffset=%u", bufferOffset));
+		}
+
 		if (cursorPos < horizScroll) {
 			// Cursor left of scroll position
 			scrollToView(ScrollView::LEFT_EDGE, forceRedraw);
@@ -886,11 +1032,16 @@ void SerialCommandEditorBase::scrollToView(ScrollView which, bool forceRedraw) {
 		if ((horizScroll + widthRightOfPrompt) > (int)bufferOffset) {
 			// Scroll is too large for the current buffer (too much whitespace on right)
 			horizScroll = bufferOffset - widthRightOfPrompt;
+			if (horizScroll < 0) {
+				horizScroll = 0;
+			}
 			redraw(horizScroll);
+			DEBUG_HIGH(("scrollToView which=VISIBLE cursorPos=%d bufferOffset=%u horizScroll=%d", cursorPos, bufferOffset, horizScroll));
 		}
 		else
 		if (forceRedraw) {
 			redraw(horizScroll);
+			DEBUG_HIGH(("scrollToView which=VISIBLE cursorPos=%d bufferOffset=%u horizScroll=%d forceRedraw=%d", cursorPos, bufferOffset, horizScroll, forceRedraw));
 		}
 		break;
 
@@ -907,12 +1058,17 @@ void SerialCommandEditorBase::scrollToView(ScrollView which, bool forceRedraw) {
 		if (forceRedraw) {
 			redraw(horizScroll);
 		}
+		DEBUG_HIGH(("scrollToView which=RIGHT_EDGE cursorPos=%d bufferOffset=%u horizScroll=%d forceRedraw=%d", cursorPos, bufferOffset, horizScroll, forceRedraw));
 		break;
 
 	case ScrollView::END:
 		cursorPos = (int)bufferOffset;
 		horizScroll = (int)bufferOffset - widthRightOfPrompt;
+		if (horizScroll < 0) {
+			horizScroll = 0;
+		}
 		redraw(horizScroll);
+		DEBUG_HIGH(("scrollToView which=END cursorPos=%d bufferOffset=%u horizScroll=%d", cursorPos, bufferOffset, horizScroll));
 		break;
 	}
 	setCursor();
@@ -928,7 +1084,7 @@ void SerialCommandEditorBase::redraw(int fromPos) {
 	//	to avoid redrawing the prompt.)
 	// "cursorPos" is the cursor position relative to buffer
 
-	// Log.info("redraw fromPos=%d horizScroll=%d", fromPos, horizScroll);
+	DEBUG_HIGH(("redraw fromPos=%d horizScroll=%d", fromPos, horizScroll));
 
 	// "fromPosCol" is the column for fromPos (taking into account scrolling and the prompt)
 	int fromPosCol = editCol + (fromPos - horizScroll);
@@ -951,8 +1107,78 @@ void SerialCommandEditorBase::redraw(int fromPos) {
 }
 
 void SerialCommandEditorBase::setCursor() {
+	DEBUG_HIGH(("setCursor editRow=%d editCol=%d cursorPos=%d horizScroll=%d", editRow, editCol, cursorPos, horizScroll));
 	setCursorPosition(editRow, editCol + cursorPos - horizScroll);
 }
+
+void SerialCommandEditorBase::printMessage(const char *fmt, ...) {
+	va_list ap;
+
+	va_start(ap, fmt);
+	vprintMessage(true, fmt, ap);
+	va_end(ap);
+}
+
+void SerialCommandEditorBase::printMessageNoPrompt(const char *fmt, ...) {
+	va_list ap;
+
+	va_start(ap, fmt);
+	vprintMessage(false, fmt, ap);
+	va_end(ap);
+}
+
+void SerialCommandEditorBase::vprintMessage(bool prompt, const char *fmt, va_list ap) {
+	char internalBuf[100], *message;
+
+    size_t count = vsnprintf(internalBuf, sizeof(internalBuf), fmt, ap);
+
+    if (count >= sizeof(internalBuf)) {
+    	// Data is too large to fit in the static buffer
+    	message = (char *)malloc(count + 1);
+    	if (message) {
+    		vsnprintf(message, count + 1, fmt, ap);
+    	}
+    	else {
+    		// Just use truncated buffer if out of memory
+    		message = internalBuf;
+    		internalBuf[sizeof(internalBuf) - 1] = 0;
+    	}
+    }
+    else {
+    	message = internalBuf;
+    }
+
+	if (terminalType != TerminalType::ANSI) {
+		// Just print the message for dumb terminal or non-interactive mode
+		printWithNewLine(message, true);
+	}
+	else {
+		// Move cursor to the left
+		setCursorPosition(editRow, 1);
+		eraseToEndOfLine();
+		promptRendered = false;
+
+		editRow += printWithNewLine(message, true);
+
+		if (prompt) {
+			printMessagePrompt();
+		}
+	}
+
+    if (message != internalBuf) {
+    	free((void *)message);
+    }
+}
+
+void SerialCommandEditorBase::printMessagePrompt() {
+	// Redraw previously entered line below he message
+	handlePromptWithCallback([this]() {
+
+		redraw(horizScroll);
+		setCursor();
+	});
+}
+
 
 void SerialCommandEditorBase::historyAdd(const char *line, bool temporary) {
 	size_t len = strlen(line) + 1;
@@ -1004,7 +1230,7 @@ String SerialCommandEditorBase::historyGet(int index) {
 }
 
 int SerialCommandEditorBase::historySize() {
-	// Log.info("historySize: buffer=%s", historyBuffer);
+	DEBUG_HIGH(("historySize: buffer=%s", historyBuffer));
 	int size = 0;
 	char *cp = historyBuffer;
 	while(*cp) {
@@ -1047,27 +1273,51 @@ void SerialCommandEditorBase::historyRemoveLast() {
 	}
 }
 
-// firstHistoryIsTemporary
+SerialCommandEditorLogHandlerBuffer::SerialCommandEditorLogHandlerBuffer(uint8_t *ringBuffer, size_t ringBufferSize, SerialCommandEditorBase *commandEditor, LogLevel level, LogCategoryFilters filters) :
+	StreamLogHandler(*this, level, filters), ringBuffer(ringBuffer, ringBufferSize), commandEditor(commandEditor) {
 
 
-// In the future, add a line editing mode
+}
 
-// https://en.wikipedia.org/wiki/GNU_Readline
-// Ctrl-A Move cursor to start of line (Home)
-// Ctrl-B Move cursor back (left arrow)
-// Ctrl-E Move cursor to end of line (End)
-// Ctrl-F Move cursor forward (right arrow)
-// Ctrl-H Delete previous character (backspace)
-// Ctrl-I Completion (tab)
-// Ctrl-K Clear content after cursor
-// Ctrl-L Clear screen
-// Ctrl-N Next Command (down arrow)
-// Ctrl-P Previous Command (up arrow)
-// Ctrl-T Transpose characters (not currently supported)
-//
+SerialCommandEditorLogHandlerBuffer::~SerialCommandEditorLogHandlerBuffer() {
 
-// https://en.wikipedia.org/wiki/ANSI_escape_code
+}
 
 
-// Also add a command line option parser
+void SerialCommandEditorLogHandlerBuffer::setup() {
+	// Add this handler into the system log manager
+	LogManager::instance()->addHandler(this);
+}
+
+
+void SerialCommandEditorLogHandlerBuffer::loop() {
+
+	while(true) {
+		uint8_t c;
+
+		bool bResult = ringBuffer.read(&c);
+		if (!bResult) {
+			break;
+		}
+
+		lineBuffer[lineBufferOffset++] = (char) c;
+		if (c == '\n' || lineBufferOffset >= (sizeof(lineBuffer) - 1)) {
+			lineBuffer[lineBufferOffset] = 0;
+
+			if (ringBuffer.availableForRead() > 0) {
+				commandEditor->printMessageNoPrompt("%s", lineBuffer);
+			}
+			else {
+				commandEditor->printMessage("%s", lineBuffer);
+			}
+			lineBufferOffset = 0;
+		}
+	}
+}
+
+size_t SerialCommandEditorLogHandlerBuffer::write(uint8_t c) {
+
+	return ringBuffer.write(&c) ? 1 : 0;
+}
+
 

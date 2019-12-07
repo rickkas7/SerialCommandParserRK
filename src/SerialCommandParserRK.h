@@ -2,6 +2,7 @@
 #define __SERIALCOMMANDPARSERRK_H
 
 #include "Particle.h"
+#include "RingBuffer.h"
 
 #include <vector>
 
@@ -75,7 +76,7 @@ public:
 	 * You normal don't need to call this as it's cleared after processing a command. This is
 	 * used during unit testing.
 	 */
-	void clear();
+	virtual void clear();
 
 	/**
 	 * @brief Process a string of data
@@ -185,7 +186,7 @@ public:
 	/**
 	 * @brief Print a string with lines terminated with \n expanded to \r\n
 	 */
-	void printWithNewLine(const char *str, bool endWithNewLine);
+	size_t printWithNewLine(const char *str, bool endWithNewLine);
 
 	char *getBuffer();
 
@@ -244,6 +245,15 @@ public:
 	 * If the index is out of bounds (larger than the largest argument), 0 is returned.
 	 */
 	float getArgFloat(size_t index) const;
+
+	/**
+	 * @brief Gets the first character of the argument
+	 *
+	 * @param index The argument to get (0 = first, 1 = second, ...)
+	 *
+	 * @param defaultValue if the argument index does not exist, return this value
+	 */
+	char getArgChar(size_t index, char defaultValue) const;
 
 	/**
 	 * @brief Add a command handler
@@ -317,10 +327,16 @@ public:
 		ANSI
 	};
 
-
 	SerialCommandEditorBase(char *historyBuffer, size_t historyBufferSize, char *buffer, size_t bufferSize, char **argsBuffer, size_t argsBufferSize);
 	virtual ~SerialCommandEditorBase();
 
+	/**
+	 * @brief Clear the data in the processor
+	 *
+	 * You normal don't need to call this as it's cleared after processing a command. This is
+	 * used during unit testing.
+	 */
+	virtual void clear();
 
 	void cursorUp(int n = 1) { printTerminalOutputSequence(n, 'A'); };
 
@@ -369,7 +385,11 @@ public:
 
 	virtual void handlePrompt();
 
-	void setBuffer(const char *str);
+	virtual void handlePromptWithCallback(std::function<void()> handlePromptCallback);
+
+	virtual void handleCompletion();
+
+	void setBuffer(const char *str, bool atEnd = false);
 
 	virtual void processChar(char c);
 
@@ -378,6 +398,15 @@ public:
 	void redraw(int fromPos = 0);
 
 	void setCursor();
+
+	void printMessage(const char *fmt, ...);
+
+	void printMessageNoPrompt(const char *fmt, ...);
+
+	void vprintMessage(bool prompt, const char *fmt, va_list ap);
+
+	void printMessagePrompt();
+
 
 	void historyAdd(const char *line, bool temporary = false);
 	String historyGet(int index);
@@ -447,7 +476,9 @@ protected:
 	int horizScroll = 0;
 	int curHistory = -1;
 	bool firstHistoryIsTemporary = false;
+	bool promptRendered = false;
 	std::function<void(int row, int col)> positionCallback = 0;
+	std::function<void()> handlePromptCallback = 0;
 };
 
 template<size_t HISTORY_BUFFER_SIZE, size_t BUFFER_SIZE, size_t MAX_ARGS>
@@ -465,5 +496,94 @@ protected:
 	char *staticArgsBuffer[MAX_ARGS];
 };
 
+/**
+ * @brief Create a LogHandler that logs to SerialCommandEditor.
+ *
+ * Instead of using this class you'll probably use SerialCommandEditorLogHandler instead, which statically allocates
+ * the buffer for you.
+ *
+ * Use this instead of `SerialLogHandler` if you are using USB serial for the command editor. It
+ * will properly mix in the log messages into the terminal output, then restore the command prompt
+ * and anything you've typed below it. This makes it much easier to enter commands while
+ * serial logging statements are being written.
+ *
+ */
+class SerialCommandEditorLogHandlerBuffer : public StreamLogHandler, public Print {
+public:
+	/**
+	 * @brief Constructor. The object is normally instantiated as a global object.
+	 *
+	 * @param ringBuffer Buffer pointer
+	 * @param ringBufferSize Buffer size. This must be large enough to hold all of the data that could be logged between calls to loop()
+	 * @param commandEditor The SerialCommandEditor to write to
+	 * @param level  (optional, default is LOG_LEVEL_INFO)
+	 * @param filters (optional, default is none)
+	 */
+	SerialCommandEditorLogHandlerBuffer(uint8_t *ringBuffer, size_t ringBufferSize, SerialCommandEditorBase *commandEditor, LogLevel level = LOG_LEVEL_INFO, LogCategoryFilters filters = {});
+	virtual ~SerialCommandEditorLogHandlerBuffer();
+
+	/**
+	 * @brief Must be called from setup
+	 *
+	 * On Gen 3 devices, it's not safe to set up the log handler at global object construction time and you will likely
+	 * fault.
+	 */
+	void setup();
+
+    /**
+     * @brief Must be called from loop
+     *
+     * This method must be called from loop(), ideally on every call to loop. The SerialCommandEditor
+     * is not thread safe, so we can only write to it from loop().
+     */
+    void loop();
+
+    /**
+     * @brief Override Print. Called by StreamLogHandler to log data.
+     */
+    size_t write(uint8_t c);
+
+    /**
+     * @brief Maximum line length
+     *
+     * If the LogHandler gets a line longer than this, it's broken into multiple lines.
+     */
+    static const size_t MAX_LINE_LEN = 128;
+
+protected:
+    RingBuffer<uint8_t> ringBuffer;
+    SerialCommandEditorBase *commandEditor;
+    char lineBuffer[MAX_LINE_LEN];
+    size_t lineBufferOffset = 0;
+};
+
+
+/**
+ * @brief Add a LogHandler logger than intermixes the output with command editing
+ *
+ * Use this instead of `SerialLogHandler` if you are using USB serial for the command editor. It
+ * will properly mix in the log messages into the terminal output, then restore the command prompt
+ * and anything you've typed below it. This makes it much easier to enter commands while
+ * serial logging statements are being written.
+ *
+ * Important: Do not enable SERIAL_COMMAND_DEBUG_LEVEL 1 or higher when using this, as it will begin
+ * logging recursively and bad things will happen!
+ */
+template<size_t BUFFER_SIZE>
+class SerialCommandEditorLogHandler : public SerialCommandEditorLogHandlerBuffer {
+public:
+	/**
+	 * @brief Constructor. The object is normally instantiated as a global object.
+	 *
+	 * @param commandEditor The SerialCommandEditor to write to
+	 * @param level  (optional, default is LOG_LEVEL_INFO)
+	 * @param filters (optional, default is none)
+	 */
+	explicit SerialCommandEditorLogHandler(SerialCommandEditorBase *commandEditor, LogLevel level = LOG_LEVEL_INFO, LogCategoryFilters filters = {}) :
+		SerialCommandEditorLogHandlerBuffer(staticBuffer, sizeof(staticBuffer), commandEditor, level, filters) {};
+
+protected:
+	uint8_t staticBuffer[BUFFER_SIZE];
+};
 
 #endif /* __SERIALCOMMANDPARSERRK_H */
