@@ -7,7 +7,12 @@
 // 0 = Off
 // 1 = Normal
 // 2 = High
-#define SERIAL_COMMAND_DEBUG_LEVEL 0
+#ifndef UNITTEST
+	#define SERIAL_COMMAND_DEBUG_LEVEL 1
+#else
+	// No debug logging in unit test mode
+	#define SERIAL_COMMAND_DEBUG_LEVEL 0
+#endif
 
 // Don't change these, just change the debugging level above
 #if SERIAL_COMMAND_DEBUG_LEVEL >= 1
@@ -25,6 +30,52 @@ static Logger log("app.sercmd");
 #endif
 
 
+SerialCommandConfig::SerialCommandConfig() {
+
+}
+
+SerialCommandConfig::~SerialCommandConfig() {
+	while(!commandHandlers.empty()) {
+		delete commandHandlers.back();
+		commandHandlers.pop_back();
+	}
+}
+
+void SerialCommandConfig::addCommandHandler(const char *cmdNames, const char *helpStr, std::function<void(SerialCommandParserBase *parser)> handler) {
+
+	std::vector<String> cmdNamesVector;
+
+	if (strchr(cmdNames, '|')) {
+		char *mutableCopy = strdup(cmdNames);
+		if (mutableCopy) {
+			char *nextToken;
+			char *token;
+			const char *delim = "|";
+			token = strtok_r(mutableCopy, delim, &nextToken);
+			while(token) {
+				cmdNamesVector.push_back(token);
+				token = strtok_r(NULL, delim, &nextToken);
+			}
+
+			free(mutableCopy);
+		}
+	}
+	else {
+		// Has no aliases
+		cmdNamesVector.push_back(cmdNames);
+	}
+
+	CommandHandlerInfo *chi = new CommandHandlerInfo(cmdNamesVector, helpStr, handler);
+
+	commandHandlers.push_back(chi);
+}
+
+void SerialCommandConfig::addHelpCommand(const char *helpCommands) {
+	addCommandHandler(helpCommands, "", [this](SerialCommandParserBase *parser) {
+		parser->printHelp();
+	});
+}
+
 
 SerialCommandParserBase::SerialCommandParserBase(char *buffer, size_t bufferSize, char **argsBuffer, size_t argsBufferSize) :
 	buffer(buffer), bufferSize(bufferSize), argsBuffer(argsBuffer), argsBufferSize(argsBufferSize) {
@@ -32,43 +83,38 @@ SerialCommandParserBase::SerialCommandParserBase(char *buffer, size_t bufferSize
 }
 
 SerialCommandParserBase::~SerialCommandParserBase() {
-	while(!commandHandlers.empty()) {
-		delete commandHandlers.back();
-		commandHandlers.pop_back();
-	}
 }
 
 void SerialCommandParserBase::setup() {
 
 }
 
+
+void SerialCommandParserBase::loop() {
+#ifndef UNITTEST
+	if (stream) {
+		if (streamType == StreamType::USBSerial) {
+			USBSerial *usbSerial = (USBSerial *)stream;
+
+			bool usbIsConnected = usbSerial->isConnected();
+			if (usbIsConnected != usbWasConnected) {
+				handleConnected(usbIsConnected);
+				usbWasConnected = usbIsConnected;
+			}
+		}
+		while(stream->available()) {
+			filterChar(stream->read());
+		}
+	}
+#endif /* UNITTEST */
+}
+
+
 void SerialCommandParserBase::clear() {
 	bufferOffset = 0;
 	argsCount = 0;
 }
 
-
-void SerialCommandParserBase::loop() {
-#ifndef UNITTEST
-	if (usartSerial) {
-		while(usartSerial->available()) {
-			filterChar(usartSerial->read());
-		}
-	}
-	else
-	if (usbSerial) {
-		bool usbIsConnected = usbSerial->isConnected();
-		if (usbIsConnected != usbWasConnected) {
-			handleConnected(usbIsConnected);
-			usbWasConnected = usbIsConnected;
-		}
-
-		while(usbSerial->available()) {
-			filterChar(usbSerial->read());
-		}
-	}
-#endif /* UNITTEST */
-}
 
 void SerialCommandParserBase::processString(const char *str) {
 	for(size_t ii = 0; str[ii]; ii++) {
@@ -193,31 +239,30 @@ void SerialCommandParserBase::processLine() {
 
 	bool handled = false;
 
-	for(CommandHandlerInfo *chi : commandHandlers) {
-		for(String cmdName : chi->cmdNames) {
-			if (strcmp(cmdName, getArgString(0)) == 0) {
-				chi->handler(this);
-				handled = true;
-				break;
+	if (!config->getCommandHandlers().empty()) {
+		for(CommandHandlerInfo *chi : config->getCommandHandlers()) {
+			for(String cmdName : chi->cmdNames) {
+				if (strcmp(cmdName, getArgString(0)) == 0) {
+					chi->handler(this);
+					handled = true;
+					break;
+				}
 			}
 		}
+		if (!handled) {
+			DEBUG_HIGH(("unknown command '%s'", getArgString(0)));
+			printHelp();
+		}
 	}
-	if (!handled && !commandHandlers.empty()) {
-		DEBUG_HIGH(("unknown command '%s'", getArgString(0)));
-		printHelp();
-	}
+
 	handlePrompt();
 }
 
 // Virtual override class Print
 size_t SerialCommandParserBase::write(uint8_t c) {
 #ifndef UNITTEST
-	if (usartSerial) {
-		return usartSerial->write(c);
-	}
-	else
-	if (usbSerial) {
-		return usbSerial->write(c);
+	if (stream) {
+		return stream->write(c);
 	}
 	else {
 		return 0;
@@ -228,15 +273,34 @@ size_t SerialCommandParserBase::write(uint8_t c) {
 #endif /* UNITTEST */
 }
 
+void SerialCommandParserBase::printHelp() {
+	for(CommandHandlerInfo *chi : config->getCommandHandlers()) {
+		String additional;
+		if (chi->cmdNames.size() > 1) {
+			additional += "(";
+			for(size_t ii = 1; ii < chi->cmdNames.size(); ii++) {
+				additional += chi->cmdNames[ii];
+				if ((ii + 1) < chi->cmdNames.size()) {
+					additional += ", ";
+				}
+			}
+			additional += ")";
+		}
+
+		printlnf("%s %s %s", chi->cmdNames[0].c_str(), chi->helpStr.c_str(), additional.c_str());
+	}
+}
+
+
 void SerialCommandParserBase::handlePrompt() {
-	if (prompt.length() > 0) {
-		print(prompt.c_str());
+	if (config->getPrompt().length() > 0) {
+		print(config->getPrompt().c_str());
 	}
 }
 
 void SerialCommandParserBase::handleWelcome() {
-	if (welcome.length() > 0) {
-		printWithNewLine(welcome, true);
+	if (config->getWelcome().length() > 0) {
+		printWithNewLine(config->getWelcome(), true);
 	}
 }
 
@@ -385,59 +449,6 @@ char SerialCommandParserBase::getArgChar(size_t index, char defaultValue) const 
 }
 
 
-void SerialCommandParserBase::addCommandHandler(const char *cmdNames, const char *helpStr, std::function<void(SerialCommandParserBase *parser)> handler) {
-
-	std::vector<String> cmdNamesVector;
-
-	if (strchr(cmdNames, '|')) {
-		char *mutableCopy = strdup(cmdNames);
-		if (mutableCopy) {
-			char *nextToken;
-			char *token;
-			const char *delim = "|";
-			token = strtok_r(mutableCopy, delim, &nextToken);
-			while(token) {
-				cmdNamesVector.push_back(token);
-				token = strtok_r(NULL, delim, &nextToken);
-			}
-
-			free(mutableCopy);
-		}
-	}
-	else {
-		// Has no aliases
-		cmdNamesVector.push_back(cmdNames);
-	}
-
-	CommandHandlerInfo *chi = new CommandHandlerInfo(cmdNamesVector, helpStr, handler);
-
-	commandHandlers.push_back(chi);
-}
-
-void SerialCommandParserBase::addHelpCommand(const char *helpCommands) {
-	addCommandHandler(helpCommands, "", [this](SerialCommandParserBase *) {
-		printHelp();
-	});
-}
-
-void SerialCommandParserBase::printHelp() {
-	for(CommandHandlerInfo *chi : commandHandlers) {
-		String additional;
-		if (chi->cmdNames.size() > 1) {
-			additional += "(";
-			for(size_t ii = 1; ii < chi->cmdNames.size(); ii++) {
-				additional += chi->cmdNames[ii];
-				if ((ii + 1) < chi->cmdNames.size()) {
-					additional += ", ";
-				}
-			}
-			additional += ")";
-		}
-
-		printlnf("%s %s %s", chi->cmdNames[0].c_str(), chi->helpStr.c_str(), additional.c_str());
-	}
-}
-
 SerialCommandEditorBase::SerialCommandEditorBase(char *historyBuffer, size_t historyBufferSize, char *buffer, size_t bufferSize, char **argsBuffer, size_t argsBufferSize) :
 		SerialCommandParserBase(buffer, bufferSize, argsBuffer, argsBufferSize),
 		historyBuffer(historyBuffer), historyBufferSize(historyBufferSize) {
@@ -461,13 +472,21 @@ void SerialCommandEditorBase::clear() {
 	cursorPos = 0;
 	horizScroll = 0;
 	promptRendered = false;
+	historyClear();
 }
 
 
 
 
 void SerialCommandEditorBase::handleConnected(bool isConnected) {
-	getScreenSize();
+	clear();
+
+	if (terminalType != TerminalType::DUMB) {
+		getScreenSize();
+	}
+	else {
+		startEditing();
+	}
 }
 
 void SerialCommandEditorBase::getCursorPosition(std::function<void(int row, int col)> callback) {
@@ -513,6 +532,7 @@ void SerialCommandEditorBase::loop() {
 	// Call base class
 	SerialCommandParserBase::loop();
 }
+
 
 void SerialCommandEditorBase::filterChar(char c) {
 	// Log.trace("char %c %d", c, c);
@@ -732,7 +752,7 @@ void SerialCommandEditorBase::handleCompletion() {
 
 	std::vector<String> possibleMatches;
 
-	for(CommandHandlerInfo *chi : commandHandlers) {
+	for(CommandHandlerInfo *chi : config->getCommandHandlers()) {
 		for(String s : chi->cmdNames) {
 			if (strncmp(s, buffer, bufferOffset) == 0) {
 				possibleMatches.push_back(s);
@@ -1273,6 +1293,209 @@ void SerialCommandEditorBase::historyRemoveLast() {
 	}
 }
 
+#ifndef UNITTEST
+
+SerialCommandTCPClient::SerialCommandTCPClient(SerialCommandTCPServer *server) : server(server) {
+}
+
+SerialCommandTCPClient::~SerialCommandTCPClient() {
+	client.stop();
+
+	if (editor) {
+		delete editor;
+	}
+	delete[] historyBuffer;
+	delete[] buffer;
+	delete[] argsBuffer;
+
+}
+
+void SerialCommandTCPClient::setup() {
+	historyBuffer = new char[server->historyBufSize];
+	buffer = new char[server->bufferSize];
+	argsBuffer = new char*[server->maxArgs];
+
+	editor = new SerialCommandEditorBase(historyBuffer, server->historyBufSize, buffer, server->bufferSize, argsBuffer, server->maxArgs);
+	if (editor) {
+		editor->withConfig(server);
+		editor->setup();
+	}
+}
+
+void SerialCommandTCPClient::loop() {
+	if (client.connected()) {
+		editor->loop();
+	}
+	else {
+		// Not connected
+		if (wasConnected) {
+			// Was previously connected, mark as not connected
+			editor->handleConnected(false);
+			wasConnected = false;
+		}
+	}
+}
+
+void SerialCommandTCPClient::setClient(TCPClient client) {
+	this->client = client;
+	editor->withStream(&this->client);
+	editor->handleConnected(true);
+
+	wasConnected = true;
+};
+
+
+SerialCommandTCPServer::SerialCommandTCPServer(size_t historyBufSize, size_t bufferSize, size_t maxArgs, size_t maxSessions, bool preallocate, uint16_t port) :
+		historyBufSize(historyBufSize), bufferSize(bufferSize), maxArgs(maxArgs), maxSessions(maxSessions), preallocate(preallocate),
+		server(port) {
+
+}
+
+SerialCommandTCPServer::~SerialCommandTCPServer() {
+
+	if (clients) {
+		for(size_t ii = 0; ii < maxSessions; ii++) {
+			delete clients[ii];
+		}
+		delete[] clients;
+	}
+}
+
+void SerialCommandTCPServer::setup() {
+	clients = new SerialCommandTCPClient*[maxSessions];
+
+	if (preallocate) {
+		for(size_t ii = 0; ii < maxSessions; ii++) {
+			clients[ii] = new SerialCommandTCPClient(this);
+
+			clients[ii]->setup();
+
+			if (!clients[ii]->isAllocated()) {
+				DEBUG_NORMAL(("failed to allocate client %u, not enough RAM", ii));
+				delete clients[ii];
+				clients[ii] = 0;
+			}
+		}
+	}
+	else {
+		for(size_t ii = 0; ii < maxSessions; ii++) {
+			clients[ii] = 0;
+		}
+	}
+}
+void SerialCommandTCPServer::loop() {
+	if (!clients) {
+		return;
+	}
+
+	bool connected = isNetworkConnected();
+	if (networkWasConnected != connected) {
+		DEBUG_NORMAL(("networkConnected=%d", connected));
+		if (connected) {
+			// Network connected, initialize listener
+#if Wiring_WiFi
+			DEBUG_NORMAL(("IP address %s", WiFi.localIP().toString().c_str()));
+#endif
+			server.begin();
+		}
+		else {
+			// Network disconnected, release all clients
+			if (!preallocate) {
+				for(size_t ii = 0; ii < maxSessions; ii++) {
+					delete clients[ii];
+					clients[ii] = 0;
+				}
+			}
+		}
+		networkWasConnected = connected;
+	}
+
+	for(size_t ii = 0; ii < maxSessions; ii++) {
+		if (clients[ii]) {
+			clients[ii]->loop();
+			if (!preallocate) {
+				if (!clients[ii]->isConnected()) {
+					// Disconnected, free entry
+					delete clients[ii];
+					clients[ii] = 0;
+					DEBUG_HIGH(("freed session=%u", ii));
+				}
+			}
+		}
+	}
+
+	// Check for connections
+	TCPClient client = server.available();
+	if (client.connected()) {
+		// Find a free entry
+		bool foundFree = false;
+		for(size_t ii = 0; ii < maxSessions; ii++) {
+			if (preallocate) {
+				if (clients[ii] && !clients[ii]->isConnected()) {
+					clients[ii]->setClient(client);
+					foundFree = true;
+					DEBUG_HIGH(("connection started session=%u", ii));
+					break;
+				}
+			}
+			else {
+				if (clients[ii] == 0) {
+					clients[ii] = new SerialCommandTCPClient(this);
+					clients[ii]->setup();
+					if (clients[ii]->isAllocated()) {
+						clients[ii]->setClient(client);
+						foundFree = true;
+						DEBUG_HIGH(("connection started session=%u", ii));
+					}
+					else {
+						clients[ii]->stop();
+						delete clients[ii];
+						clients[ii] = 0;
+						DEBUG_NORMAL(("failed to allocate client"));
+					}
+					break;
+				}
+			}
+		}
+		if (foundFree) {
+			DEBUG_NORMAL(("connection from %s", client.remoteIP().toString().c_str()));
+		}
+		else {
+			DEBUG_NORMAL(("connection from %s rejected, too many sessions", client.remoteIP().toString().c_str()));
+			client.stop();
+		}
+	}
+}
+
+bool SerialCommandTCPServer::isNetworkConnected() {
+#if Wiring_Cellular
+	return Cellular.ready();
+#endif
+#if Wiring_WiFi
+	return WiFi.ready();
+#endif
+#if Wiring_Ethernet
+	return Ethernet.ready();
+#endif
+}
+
+void SerialCommandTCPServer::stop(SerialCommandParserBase *parser) {
+	for(size_t ii = 0; ii < maxSessions; ii++) {
+		if (clients[ii]) {
+			if (clients[ii]->getParser() == parser) {
+				clients[ii]->stop();
+				DEBUG_HIGH(("stop session=%u", ii));
+				// Delete client from loop, not here
+				break;
+			}
+		}
+	}
+}
+
+#endif /* UNITTEST */
+
+#ifndef UNITTEST
+
 SerialCommandEditorLogHandlerBuffer::SerialCommandEditorLogHandlerBuffer(uint8_t *ringBuffer, size_t ringBufferSize, SerialCommandEditorBase *commandEditor, LogLevel level, LogCategoryFilters filters) :
 	StreamLogHandler(*this, level, filters), ringBuffer(ringBuffer, ringBufferSize), commandEditor(commandEditor) {
 
@@ -1319,5 +1542,7 @@ size_t SerialCommandEditorLogHandlerBuffer::write(uint8_t c) {
 
 	return ringBuffer.write(&c) ? 1 : 0;
 }
+
+#endif /* UNITTEST */
 
 

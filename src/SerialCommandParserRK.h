@@ -30,6 +30,52 @@ public:
 	std::function<void(SerialCommandParserBase *parser)> handler;
 };
 
+class SerialCommandConfig {
+public:
+	SerialCommandConfig();
+	virtual ~SerialCommandConfig();
+
+	SerialCommandConfig &withPrompt(const char *prompt) { this->prompt = prompt; return *this; };
+
+	/**
+	 * @brief Set the welcome message upon connection (USB serial only) (optional)
+	 *
+	 * Since the hardware UART doesn't have connection detection, this is not used.
+	 */
+	SerialCommandConfig &withWelcome(const char *welcome) { this->welcome = welcome; return *this; };
+
+	/**
+	 * @brief Add a command handler
+	 *
+	 * @param cmdName The name of the command, or a list of aliases separated by |. For example: "quit|exit" with no extra spaces.
+	 *
+	 * @param helpStr The help string to display for this command. This should not include the command name or alises; these
+	 * are added automatically.
+	 *
+	 * @param handler The function or lambda to call when the command is entered.
+	 */
+	void addCommandHandler(const char *cmdName, const char *helpStr, std::function<void(SerialCommandParserBase *parser)> handler);
+
+	/**
+	 * @brief Add a help command. The default is "help" or "?" but you can override this.
+	 *
+	 * Typically you call this after adding all of your commands using addCommandHandler().
+	 */
+	void addHelpCommand(const char *helpCommand = "help|?");
+
+
+	const String &getPrompt() const { return prompt; };
+	const String &getWelcome() const { return welcome; };
+
+	std::vector<CommandHandlerInfo*> &getCommandHandlers() { return commandHandlers; };
+
+protected:
+	std::vector<CommandHandlerInfo*> commandHandlers;
+	String prompt;
+	String welcome;
+
+};
+
 /**
  * @brief Base class for serial command parsers.
  *
@@ -38,6 +84,12 @@ public:
  */
 class SerialCommandParserBase : public Print {
 public:
+	enum class StreamType {
+		NONE,
+		USARTSerial,
+		USBSerial,
+		Stream
+	};
 	/**
 	 * @brief Constructor
 	 *
@@ -69,6 +121,7 @@ public:
 	 * Serial is read and and callbacks are called from within loop.
 	 */
 	void loop();
+
 
 	/**
 	 * @brief Clear the data in the processor
@@ -164,24 +217,32 @@ public:
 	 *
 	 * This overload is used for hardware UARTs: Serial1, Serial2, Serial3, ...
 	 */
-	SerialCommandParserBase &withSerial(USARTSerial *serial) { this->usbSerial = 0; this->usartSerial = serial; return *this; };
+	SerialCommandParserBase &withSerial(USARTSerial *serial) { this->streamType = StreamType::USARTSerial; this->stream = serial; return *this; };
 
 	/**
 	 * @brief Sets the USB serial port to read/write to
 	 *
 	 * This overload is used for USB serial ports: Serial, USBSerial1.
 	 */
-	SerialCommandParserBase &withSerial(USBSerial *serial) { this->usbSerial = serial; this->usartSerial = 0; return *this; };
-#endif /* UNITTEST */
-
-	SerialCommandParserBase &withPrompt(const char *prompt) { this->prompt = prompt; return *this; };
+	SerialCommandParserBase &withSerial(USBSerial *serial) { this->streamType = StreamType::USBSerial; this->stream = serial; return *this; };
 
 	/**
-	 * @brief Set the welcome message upon connection (USB serial only) (optional)
+	 * @brief Sets a Stream to read/write to. This is used for TCPClient.
 	 *
-	 * Since the hardware UART doesn't have connection detection, this is not used.
 	 */
-	SerialCommandParserBase &withWelcome(const char *welcome) { this->welcome = welcome; return *this; };
+	SerialCommandParserBase &withStream(Stream *stream) { this->streamType = StreamType::Stream; this->stream = stream; return *this; };
+
+#endif /* UNITTEST */
+
+	SerialCommandParserBase &withConfig(SerialCommandConfig *config) { this->config = config; return *this; };
+
+	/**
+	 * @brief Prints the help message.
+	 *
+	 * This is normally handled automatically by addHelpCommand(), but is separate so the help/usage can be displayed
+	 * when you enter an invalid command as well.
+	 */
+	void printHelp();
 
 	/**
 	 * @brief Print a string with lines terminated with \n expanded to \r\n
@@ -255,32 +316,6 @@ public:
 	 */
 	char getArgChar(size_t index, char defaultValue) const;
 
-	/**
-	 * @brief Add a command handler
-	 *
-	 * @param cmdName The name of the command, or a list of aliases separated by |. For example: "quit|exit" with no extra spaces.
-	 *
-	 * @param helpStr The help string to display for this command. This should not include the command name or alises; these
-	 * are added automatically.
-	 *
-	 * @param handler The function or lambda to call when the command is entered.
-	 */
-	void addCommandHandler(const char *cmdName, const char *helpStr, std::function<void(SerialCommandParserBase *parser)> handler);
-
-	/**
-	 * @brief Add a help command. The default is "help" or "?" but you can override this.
-	 *
-	 * Typically you call this after adding all of your commands using addCommandHandler().
-	 */
-	void addHelpCommand(const char *helpCommand = "help|?");
-
-	/**
-	 * @brief Prints the help message.
-	 *
-	 * This is normally handled automatically by addHelpCommand(), but is separate so the help/usage can be displayed
-	 * when you enter an invalid command as well.
-	 */
-	void printHelp();
 
 protected:
 	char *buffer;
@@ -290,20 +325,20 @@ protected:
 	size_t argsCount = 0;
 	size_t bufferOffset = 0;
 #ifndef UNITTEST
-	USBSerial *usbSerial = 0;
-	USARTSerial *usartSerial = 0;
+	StreamType streamType = StreamType::NONE;
+	Stream *stream = 0;
 	bool usbWasConnected = false;
 #endif /* UNITTEST */
-	std::vector<CommandHandlerInfo*> commandHandlers;
-	String prompt;
-	String welcome;
+	SerialCommandConfig *config = 0;
 };
 
 
 template<size_t BUFFER_SIZE, size_t MAX_ARGS>
-class SerialCommandParser : public SerialCommandParserBase {
+class SerialCommandParser : public SerialCommandParserBase, public SerialCommandConfig {
 public:
-	SerialCommandParser() : SerialCommandParserBase(staticBuffer, BUFFER_SIZE, staticArgsBuffer, MAX_ARGS) {};
+	SerialCommandParser() : SerialCommandParserBase(staticBuffer, BUFFER_SIZE, staticArgsBuffer, MAX_ARGS) {
+		withConfig(this);
+	};
 	virtual ~SerialCommandParser() {};
 
 protected:
@@ -407,6 +442,7 @@ public:
 
 	void printMessagePrompt();
 
+	void setTerminalType(TerminalType terminalType) { this->terminalType = terminalType; }
 
 	void historyAdd(const char *line, bool temporary = false);
 	String historyGet(int index);
@@ -482,19 +518,82 @@ protected:
 };
 
 template<size_t HISTORY_BUFFER_SIZE, size_t BUFFER_SIZE, size_t MAX_ARGS>
-class SerialCommandEditor : public SerialCommandEditorBase {
+class SerialCommandEditor : public SerialCommandEditorBase, public SerialCommandConfig {
 public:
-	SerialCommandEditor() : SerialCommandEditorBase(historyBuffer, HISTORY_BUFFER_SIZE, staticBuffer, BUFFER_SIZE, staticArgsBuffer, MAX_ARGS) {
-		historyBuffer[0] = 0;
+	SerialCommandEditor() : SerialCommandEditorBase(staticHistoryBuffer, HISTORY_BUFFER_SIZE, staticBuffer, BUFFER_SIZE, staticArgsBuffer, MAX_ARGS) {
+		staticHistoryBuffer[0] = 0;
+		withConfig(this);
 	};
 	virtual ~SerialCommandEditor() {};
 
 
 protected:
-	char historyBuffer[HISTORY_BUFFER_SIZE];
+	char staticHistoryBuffer[HISTORY_BUFFER_SIZE];
 	char staticBuffer[BUFFER_SIZE];
 	char *staticArgsBuffer[MAX_ARGS];
 };
+
+#ifndef UNITTEST
+
+class SerialCommandTCPServer; // Forward declaration
+
+class SerialCommandTCPClient {
+public:
+	SerialCommandTCPClient(SerialCommandTCPServer *server);
+	virtual ~SerialCommandTCPClient();
+
+	void setup();
+	void loop();
+
+	void setClient(TCPClient client);
+
+	void stop() { client.stop(); };
+
+	bool isConnected() { return client.connected(); };
+
+	bool isAllocated() const { return editor && historyBuffer && buffer && argsBuffer; };
+
+	SerialCommandEditorBase *getEditor() { return editor; };
+	SerialCommandParserBase *getParser() { return editor; };
+
+protected:
+	SerialCommandTCPServer *server;
+	SerialCommandEditorBase *editor = 0;
+	char *historyBuffer = 0;
+	char *buffer = 0;
+	char **argsBuffer = 0;
+	TCPClient client;
+	bool wasConnected = false;
+};
+
+class SerialCommandTCPServer : public SerialCommandConfig {
+public:
+	SerialCommandTCPServer(size_t historyBufSize, size_t bufferSize, size_t maxArgs, size_t maxSessions, bool preallocate, uint16_t port);
+	virtual ~SerialCommandTCPServer();
+
+	void setup();
+	void loop();
+
+	bool isNetworkConnected();
+
+	void stop(SerialCommandParserBase *parser);
+
+
+protected:
+	size_t historyBufSize;
+	size_t bufferSize;
+	size_t maxArgs;
+	size_t maxSessions;
+	bool preallocate;
+	bool networkWasConnected = false;
+	SerialCommandTCPClient **clients = 0;
+	TCPServer server;
+	friend class SerialCommandTCPClient;
+};
+
+#endif /* UNITTEST */
+
+#ifndef UNITTEST
 
 /**
  * @brief Create a LogHandler that logs to SerialCommandEditor.
@@ -543,6 +642,8 @@ public:
      */
     size_t write(uint8_t c);
 
+    void close(SerialCommandParserBase *parser);
+
     /**
      * @brief Maximum line length
      *
@@ -566,7 +667,7 @@ protected:
  * and anything you've typed below it. This makes it much easier to enter commands while
  * serial logging statements are being written.
  *
- * Important: Do not enable SERIAL_COMMAND_DEBUG_LEVEL 1 or higher when using this, as it will begin
+ * Important: Do not enable SERIAL_COMMAND_DEBUG_LEVEL 2 when using this, as it will begin
  * logging recursively and bad things will happen!
  */
 template<size_t BUFFER_SIZE>
@@ -585,5 +686,7 @@ public:
 protected:
 	uint8_t staticBuffer[BUFFER_SIZE];
 };
+#endif /* UNITTEST */
+
 
 #endif /* __SERIALCOMMANDPARSERRK_H */

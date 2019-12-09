@@ -5,5 +5,15 @@
   argon: [0.9.0, 1.1.0, latest]
   boron: [1.2.1, latest]
   xenon: [latest]
+- build: examples/2-line-editing
+  argon: [latest]
+- build: examples/3-line-editing-uart
+  argon: [latest]
+- build: examples/4-print-message
+  argon: [latest]
+- build: examples/5-log-handler
+  argon: [latest]
+- build: examples/6-tcp-server
+  argon: [latest]
 
   

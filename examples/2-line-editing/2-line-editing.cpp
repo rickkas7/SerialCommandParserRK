@@ -12,12 +12,12 @@ SerialCommandEditor<1000, 256, 16> commandParser;
 void setup() {
 	Serial.begin();
 
+	// Configuration of prompt and welcome message
 	commandParser
-		.withSerial(&Serial)
 		.withPrompt("> ")
-		.withWelcome("Serial Command Parser Test!")
-		.setup();
+		.withWelcome("Serial Command Parser Test!");
 
+	// Command configuration
 	commandParser.addCommandHandler("test", "test command", [](SerialCommandParserBase *) {
 		commandParser.printMessageNoPrompt("got test command!");
 		for(size_t ii = 0; ii < commandParser.getArgsCount(); ii++) {
@@ -38,6 +38,12 @@ void setup() {
 	});
 
 	commandParser.addHelpCommand();
+
+	// Connect to Serial and start running
+	commandParser
+		.withSerial(&Serial)
+		.setup();
+
 }
 
 void loop() {

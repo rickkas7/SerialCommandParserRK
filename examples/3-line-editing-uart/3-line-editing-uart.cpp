@@ -9,11 +9,11 @@ SerialCommandEditor<1000, 256, 16> commandParser;
 void setup() {
 	Serial1.begin(9600);
 
+	// Set prompt. Welcome message is not supported on UART serial
 	commandParser
-		.withSerial(&Serial1)
-		.withPrompt("> ")
-		.setup();
+		.withPrompt("> ");
 
+	// Add command handlers
 	commandParser.addCommandHandler("test", "test command", [](SerialCommandParserBase *) {
 		Serial.println("got test command!");
 		for(size_t ii = 0; ii < commandParser.getArgsCount(); ii++) {
@@ -21,6 +21,12 @@ void setup() {
 		}
 	});
 	commandParser.addHelpCommand();
+
+	// Connect to Serial1 and start running
+	commandParser
+		.withSerial(&Serial1)
+		.setup();
+
 }
 
 void loop() {

@@ -18,12 +18,12 @@ int counter = 0;
 void setup() {
 	Serial.begin();
 
+	// Set prompt and welcome message
 	commandParser
-		.withSerial(&Serial)
 		.withPrompt("> ")
-		.withWelcome("Serial Command Parser Test!")
-		.setup();
+		.withWelcome("Serial Command Parser Test!");
 
+	// Add commands
 	commandParser.addCommandHandler("test", "test command", [](SerialCommandParserBase *) {
 		Serial.println("got test command!");
 		for(size_t ii = 0; ii < commandParser.getArgsCount(); ii++) {
@@ -32,6 +32,12 @@ void setup() {
 	});
 
 	commandParser.addHelpCommand();
+
+	// Connect to serial and start running
+	commandParser
+		.withSerial(&Serial)
+		.setup();
+
 }
 
 void loop() {

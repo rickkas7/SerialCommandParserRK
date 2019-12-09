@@ -21,12 +21,12 @@ void setup() {
 
 	logHandler.setup();
 
+	// Common configuration settings
 	commandParser
-		.withSerial(&Serial)
 		.withPrompt("test> ")
-		.withWelcome("Serial Command Parser Test!")
-		.setup();
+		.withWelcome("Serial Command Parser Test!");
 
+	// Command handlers
 	commandParser.addCommandHandler("test", "test command", [](SerialCommandParserBase *) {
 		Serial.println("got test command!");
 		for(size_t ii = 0; ii < commandParser.getArgsCount(); ii++) {
@@ -34,7 +34,14 @@ void setup() {
 		}
 	});
 
+	// Help
 	commandParser.addHelpCommand();
+
+	// Final setup
+	commandParser
+		.withSerial(&Serial)
+		.setup();
+
 }
 
 void loop() {
