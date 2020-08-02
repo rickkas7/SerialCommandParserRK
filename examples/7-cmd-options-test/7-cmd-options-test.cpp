@@ -37,6 +37,12 @@ void setup() {
     .addCommandOption('v', "verbose", "increase verbosity")
     .addCommandOption('x', "x-value", "x value", false, 1);
 
+
+	commandParser.addCommandHandler("tar", "sample tar subset", [](SerialCommandParserBase *) {
+	})
+    .addCommandOption('c', "create", "create a file")
+    .addCommandOption('f', "file", "file", false, 1);
+
 	commandParser.addHelpCommand();
 
 	// Connect to Serial and start running
@@ -255,6 +261,76 @@ void runUnitTest() {
 		//Log.info(cps->getError());
 		assertEqualString(cps->getError(), "unknown option -z");
 	}
+
+	{
+		commandParser.clear();
+		commandParser.processString("test3 -v abc 123");
+		commandParser.processLine();
+
+		CommandParsingState *cps = commandParser.getParsingState();
+		assertNotNull(cps);
+		assertEqualInt(cps->getParseSuccess(), true);
+
+		assertEqualInt(cps->getByShortOpt('l'), 0);	
+
+		assertNotNull(cps->getByShortOpt('v'));	
+		assertEqualInt(cps->getByShortOpt('v')->count, 1);
+
+		assertEqualInt(cps->getNumExtraArgs(), 2);
+		assertEqualString(cps->getArgString(0), "abc");
+
+		assertEqualInt(cps->getArgInt(1), 123);
+
+		assertEqualString(cps->getArgString(2), "");
+
+	}
+
+	{
+		commandParser.clear();
+		commandParser.processString("test3 abc 123 --verbose");
+		commandParser.processLine();
+
+		CommandParsingState *cps = commandParser.getParsingState();
+		assertNotNull(cps);
+		assertEqualInt(cps->getParseSuccess(), true);
+
+		assertEqualInt(cps->getByShortOpt('l'), 0);	
+
+		assertNotNull(cps->getByShortOpt('v'));	
+		assertEqualInt(cps->getByShortOpt('v')->count, 1);
+
+		assertEqualInt(cps->getNumExtraArgs(), 2);
+		assertEqualString(cps->getArgString(0), "abc");
+
+		assertEqualInt(cps->getArgInt(1), 123);
+
+		assertEqualString(cps->getArgString(2), "");
+
+	}
+
+	{
+		commandParser.clear();
+		commandParser.processString("tar -cf file.tar file1 file2 file3");
+		commandParser.processLine();
+
+		CommandParsingState *cps = commandParser.getParsingState();
+		assertNotNull(cps);
+		assertEqualInt(cps->getParseSuccess(), true);
+
+		assertNotNull(cps->getByShortOpt('c'));	
+		assertEqualInt(cps->getByShortOpt('c')->count, 1);
+
+		assertNotNull(cps->getByShortOpt('f'));	
+		assertEqualInt(cps->getByShortOpt('f')->getNumArgs(), 1);
+		assertEqualString(cps->getByShortOpt('f')->getArgString(0), "file.tar");
+
+		assertEqualInt(cps->getNumExtraArgs(), 3);
+		assertEqualString(cps->getArgString(0), "file1");
+		assertEqualString(cps->getArgString(1), "file2");
+		assertEqualString(cps->getArgString(2), "file3");
+
+	}
+
 
 	Log.info("runUnitTest completed!");
 }

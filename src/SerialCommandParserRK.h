@@ -10,21 +10,86 @@ class SerialCommandParserBase; // Forward declaration
 
 /**
  * @brief Specifies information about a single option for a command
+ * 
+ * You normally don't construct this directly; CommandHandlerInfo::addCommandOption does this for you.
  */
 class CommandOption {
 public:
-	CommandOption();
-	virtual ~CommandOption();	
-
+	/**
+	 * @brief Construct object. You normally don't construct this directly; CommandHandlerInfo::addCommandOption does this for you.
+	 * 
+	 * @param shortOpt Short option character. It's required that every option have a unique shortOpt. However,
+	 * you can use negative values to make unique values that don't show and can't be type in the UI. This allows
+	 * the shortOpt to be the unique identifier for a command.
+	 * 
+	 * @param longOpt Long option name. Recommended for all options to make it easier to understand what it is.
+	 * Does not contain the leading --, that is handled elsewhere.
+	 * 
+	 * @param help The help string. Note that it's expected that you will pass in a string constant. The help string
+	 * is not copied! If you are dynamically generating them, store them on the heap.
+	 * 
+	 * @param required Whether the option is required or not. Default is false (not required).
+	 * 
+	 * @param requiredArgs The number of space separated arguments after this option. Default is 0 (no options).
+	 * These are different than optional extra arguments to a command.
+	 */
 	CommandOption(char shortOpt, const char *longOpt, const char *help, bool required = false, size_t requiredArgs = 0);
 
+	/**
+	 * @brief Destructor
+	 */
+	virtual ~CommandOption();	
+
+	/**
+	 * @brief Get a readable name for this option
+	 * 
+	 * It's of the form:
+	 * 
+	 * --long (-c)
+	 * --long
+	 * -c
+	 * 
+	 * This is used in error messages.
+	 */
 	String getName() const;
 
 	// Configuration parameters
+
+	/**
+	 * @brief Short option character
+	 * 
+	 * It's required that every option have a unique shortOpt. However,
+	 * you can use negative values to make unique values that don't show and can't be type in the UI. This allows
+	 * the shortOpt to be the unique identifier for a command.
+	 */
 	char shortOpt = 0;
+
+	/**
+	 * @brief Long option name
+	 * 
+	 * Recommended for all options to make it easier to understand what it is.
+	 * Does not contain the leading --, that is handled elsewhere.
+	 */
 	const char *longOpt = NULL;
+
+	/**
+	 * @brief The help string
+	 * 
+	 * Note that it's expected that you will pass in a string constant. The help string
+	 * is not copied! If you are dynamically generating them, store them on the heap.
+	 */
 	const char *help = NULL;
+
+	/**
+	 * @brief Whether the option is required or not. Default is false (not required).
+	 */
 	bool required = false;
+
+	/**
+	 * @brief The number of space separated arguments after this option. 
+	 * 
+	 * Default is 0 (no options). These are different than optional extra arguments to a command.
+	 */
 	size_t requiredArgs = 0;
 };
 
@@ -32,43 +97,139 @@ public:
 /**
  * @brief Class to hold information about a single command
  *
- * @param cmdNames vector of command names. First is the primary name, subsequent are aliases.
- *
- * @param helpStr the help string to display
- *
- * @param handler Function to call to handle the command
- *
- * You normally don't use this class directly; it's instantiated in addCommandHandler() for you.
+ * You normally don't use this class directly; it's instantiated in 
+ * SerialCommandConfig::addCommandHandler() for you.
  */
 class CommandHandlerInfo {
 public:
+	/**
+	 * @brief Constructor
+	 * 
+	 * @param cmdNames vector of command names. First is the primary name, subsequent are aliases.
+	 *
+	 * @param helpStr the help string to display
+	 *
+	 * @param handler Function to call to handle the command
+	 *
+	 * You normally don't use this class directly; it's instantiated in addCommandHandler() for you.	 
+	 */
 	CommandHandlerInfo(std::vector<String> cmdNames, const char *helpStr, std::function<void(SerialCommandParserBase *parser)> handler);
+
+	/**
+	 * @brief Destructor
+	 */
 	virtual ~CommandHandlerInfo();
 
+	/**
+	 * @brief Specify options for this command
+	 * 
+	 * @param shortOpt Short option character. It's required that every option have a unique shortOpt. However,
+	 * you can use negative values to make unique values that don't show and can't be type in the UI. This allows
+	 * the shortOpt to be the unique identifier for a command.
+	 * 
+	 * @param longOpt Long option name. Recommended for all options to make it easier to understand what it is.
+	 * Does not contain the leading --, that is handled elsewhere.
+	 * 
+	 * @param help The help string. Note that it's expected that you will pass in a string constant. The help string
+	 * is not copied! If you are dynamically generating them, store them on the heap.
+	 * 
+	 * @param required Whether the option is required or not. Default is false (not required).
+	 * 
+	 * @param requiredArgs The number of space separated arguments after this option. Default is 0 (no options).
+	 * These are different than optional extra arguments to a command.
+	 * 
+	 * SerialCommandConfig::addCommandHandler() returns a CommandHandlerInfo & so you can add 
+	 * command options, fluent-style, one after the other, in a single block of code.
+	 */
 	CommandHandlerInfo &addCommandOption(char shortOpt, const char *longOpt, const char *help, bool required = false, size_t requiredArgs = 0);
+
+	/**
+	 * @brief Specify options for this command using a CommandOption object
+	 * 
+	 * @param opt The CommandOption object. This must be a pointer to a heap allocated object and ownership
+	 * transfers with this call. It will be deleted when the CommandHandlerInfo is deleted.
+	 */
 	CommandHandlerInfo &addCommandOption(CommandOption *opt);
 
+	/**
+	 * @brief Get the CommandOption by shortOpt
+	 * 
+	 * @param shortOpt Short option char. Can be either a normal readable or a special negative hidden value.
+	 * 
+	 * @return The CommandOption *, or NULL if the option is not configured. The ownership of the returned
+	 * object is still this object. You must not delete or modify the returned value!
+	 */
 	const CommandOption *getByShortOpt(char shortOpt) const;
 
+	/**
+	 * @brief Get the CommandOption by longOpt
+	 * 
+	 * @param longOpt Long option string. Must not not contain the leading --.
+	 * 
+	 * @return The CommandOption *, or NULL if the option is not configured. The ownership of the returned
+	 * object is still this object. You must not delete or modify the returned value!
+	 */
 	const CommandOption *getByLongOpt(const char *longOpt) const;
 
+	/**
+	 * @brief Returns true if options have been configured for this command.
+	 */
 	bool hasOptions() const { return !cmdOptions.empty(); };
 
+	/**
+	 * @param Vector of command names. First is the primary name, any aliases are after that.
+	 */
 	std::vector<String> cmdNames;
+
+	/**
+	 * @param The help string for the command
+	 * 
+	 * It's expected that you will pass in a string constant. The help string
+	 * is not copied! If you are dynamically generating them, store them on the heap.
+	 */
 	const char *helpStr;
+
+	/**
+	 * @brief Vector of CommandOption objects for the objects for this command
+	 * 
+	 * This object owns the pointers in this vector and they are deleted when this
+	 * object is deleted
+	 */
 	std::vector<CommandOption*> cmdOptions;
+
+	/**
+	 * @brief The handler function to handle when this command is issued
+	 */
 	std::function<void(SerialCommandParserBase *parser)> handler;
 };
 
 /**
- * @brief Class that specifies a single option and possibly args
+ * @brief Abstract base for retrieving indexed arguments parsed as a specific type 
+ * (string, int, char, float)
+ * 
+ * There are two concrete subclasses of this class: CommandArgsParserVector and
+ * CommandArgsParserArray.
+ * 
+ * The classes CommandOptionParsingState, CommandParsingState, SerialCommandParserBase
+ * inherit from one of the concrete subclasses of this class, given those classes the 
+ * methods here to get indexed arguments a string, bool, int, or float.
  */
-class CommandOptionParsingState {
-public:
-	CommandOptionParsingState();
-	virtual ~CommandOptionParsingState();
+class CommandArgsParserBase {
+public: 
+	/**
+	 * @brief Constructor
+	 */
+	CommandArgsParserBase();
 
-	size_t getNumArgs() const { return args.size(); };
+	/**
+	 * @brief Destructor
+	 */
+	virtual ~CommandArgsParserBase();
+
+	/**
+	 * @brief Get the number of arguments available
+	 */
+	virtual size_t getArgCount() const = 0;
 
 	/**
 	 * @brief Get a parsed argument by index
@@ -77,7 +238,7 @@ public:
 	 *
 	 * If the index is out of bounds (larger than the largest argument), an empty string is returned.
 	 */
-	const char *getArgString(size_t index) const;
+	virtual const char *getArgString(size_t index) const = 0;
 
 	/**
 	 * @brief Get a parsed argument by as a bool
@@ -95,7 +256,7 @@ public:
 	 *
 	 * @param index The argument to get (0 = first, 1 = second, ...)
 	 *
-	 * If the value is not a number, then 0 is returned. It uses atoi internally, so rules for that apply.
+	 * If the value is not a number, then 0 is returned. It uses atoi() internally, so rules for that apply.
 	 *
 	 * If the index is out of bounds (larger than the largest argument), 0 is returned.
 	 */
@@ -106,7 +267,7 @@ public:
 	 *
 	 * @param index The argument to get (0 = first, 1 = second, ...)
 	 *
-	 * If the value is not a number, then 0 is returned. It uses atof internally, so rules for that apply.
+	 * If the value is not a number, then 0 is returned. It uses atof() internally, so rules for that apply.
 	 *
 	 * If the index is out of bounds (larger than the largest argument), 0 is returned.
 	 */
@@ -121,27 +282,244 @@ public:
 	 */
 	char getArgChar(size_t index, char defaultValue) const;
 
+};
+
+/**
+ * @brief Class for retrieving indexed arguments parsed as a specific type (string, int, char, float, char)
+ * 
+ * This class is a base class of CommandOptionParsingState and CommandParsingState.
+ */
+class CommandArgsParserVector : public CommandArgsParserBase {
+public:
+	CommandArgsParserVector(std::vector<String> &vec);
+	virtual ~CommandArgsParserVector();
+
+	/**
+	 * @brief Get the number of arguments available
+	 */
+	virtual size_t getArgCount() const;
+
+	/**
+	 * @brief Get a parsed argument by index
+	 *
+	 * @param index The argument to get (0 = first, 1 = second, ...)
+	 *
+	 * If the index is out of bounds (larger than the largest argument), an empty string is returned.
+	 */
+	virtual const char *getArgString(size_t index) const;
+
+protected:
+	std::vector<String> &vec;
+};
+
+/**
+ * @brief Class for retrieving indexed arguments parsed as a specific type (string, int, char, float, char)
+ * 
+ * This class is a base class of SerialCommandParserBase.
+ */
+class CommandArgsParserArray : public CommandArgsParserBase {
+public:
+	CommandArgsParserArray(char **argsBuffer, size_t *argsCountPtr);
+
+	virtual ~CommandArgsParserArray();
+
+	/**
+	 * @brief Get the number of arguments available
+	 */
+	virtual size_t getArgCount() const;
+
+	/**
+	 * @brief Get a parsed argument by index
+	 *
+	 * @param index The argument to get (0 = first, 1 = second, ...)
+	 *
+	 * If the index is out of bounds (larger than the largest argument), an empty string is returned.
+	 */
+	virtual const char *getArgString(size_t index) const;
+
+protected:
+	char **argsBuffer;
+	size_t *argsCountPtr;
+
+};
+
+/**
+ * @brief Class that specifies a single option and possibly args that were parsed
+ * 
+ * You will not normally instantiate one of these, but CommandParsingState does
+ * during parsing as options are encountered.
+ * 
+ * Take the example this command:
+ * 	commandParser.addCommandHandler("tar", "sample tar subset", [](SerialCommandParserBase *) {
+ *	})
+ *  .addCommandOption('c', "create", "create a file")
+ *  .addCommandOption('f', "file", "file", false, 1);
+ *
+ * And calling it like this:
+ * 
+ *  tar -cf file.tar file1 file2 file3
+ * 
+ * For the -f option (shortOpt = 'f'), getNumArgs() is 1 and getArgString(0) is "file.tar".
+ * 
+ * The file1, file2, file3 are stored in CommandParsingState in extraArgs as those are not
+ * associated with a specific option.
+ */
+class CommandOptionParsingState : public CommandArgsParserVector {
+public:
+	/**
+	 * @brief Constructor
+	 * 
+	 * You will not normally instantiate one of these, but CommandParsingState does
+	 * during parsing as options are encountered.
+	 */
+	CommandOptionParsingState();
+
+	/**
+	 * @brief Destructor
+	 * 
+	 * This object is typically owned by the CommandParsingState object which controls
+	 * the lifecycle of this object.
+	 */
+	virtual ~CommandOptionParsingState();
+
+	/**
+	 * @brief Get the number of arguments after the option
+	 */
+	size_t getNumArgs() const { return args.size(); };
+
+	/**
+	 * @brief The shortOpt for this option
+	 * 
+	 * Note that the shortOpt is the unique identifier for an option even if the
+	 * longOpt was used. Every option has a unique shortOpt value. If you have
+	 * an option with a longOpt but no user-readable shortOpt, pass a unique
+	 * negative number in shortOpt to uniquely identify it. Negative values
+	 * are not displayed.
+	 */
 	char shortOpt = 0;
+
+	/**
+	 * @brief Count of number of times the option was used, typically 1
+	 * 
+	 * This is used for things like -v for verbose with increasing levels
+	 * of verbosity for -vv, -vvv, etc.
+	 */
 	size_t count = 0;
-	std::vector<String> args;
+
+	/**
+	 * @brief Optional arguments (space separated) after an option
+	 */
+	std::vector<String> args; 
 };
 
 /**
  * @brief Class that holds the result of parsing a command line with options
+ * 
+ * This object is instantiated during SerialCommandParserBase::parseLine()
+ * if the command has options configured. It holds the parsed option state,
+ * as opposed to the CommandHandlerInfo that holds the settings. 
  */
-class CommandParsingState {
+class CommandParsingState : public CommandArgsParserVector {
 public:
+	/**
+	 * @brief Constructor for parsing state
+	 */
 	CommandParsingState(CommandHandlerInfo *chi);
+
+	/**
+	 * @brief Destructor
+	 */
 	virtual ~CommandParsingState();
 
+	/**
+	 * @brief Clear settings
+	 * 
+	 * This clears the options, extraArrays vectors, sets the parseSuccess to false, and clears the
+	 * err string.
+	 */
 	void clear();
+
+	/**
+	 * @brief Perform the parse
+	 * 
+	 * @param argsBuffer The args buffer set up by SerialCommandParserBase::parseLine().
+	 * 
+	 * @param argsCount The number of args set up by SerialCommandParserBase::parseLine().
+	 * 
+	 * This is actually the number of tokens parsed from the command line; the first is the
+	 * command name.
+	 * 
+	 * This function is void but the parse status can be determined by using parseSuccess()
+	 * and getError(). The reason is that the command handler will need to access this
+	 * information, not the caller to parse().
+	 */
 	void parse(const char * const *argsBuffer, size_t argsCount);
 
+	/**
+	 * @brief Get the parsing state by its short option code
+	 * 
+	 * @param shortOpt The option to get
+	 * 
+	 * Note that the shortOpt is the unique identifier for an option even if the
+	 * longOpt was used. Every option has a unique shortOpt value. If you have
+	 * an option with a longOpt but no user-readable shortOpt, pass a unique
+	 * negative number in shortOpt to uniquely identify it. Negative values
+	 * are not displayed.
+	 * 
+	 * Returns a CommandOptionParsingState * if the option was present in the
+	 * parsed command line. Returns NULL if the option was not included.
+	 * The object returned is owned by this object and it must not be 
+	 * disposed of by your code. This object manages the lifecycle of the
+	 * object. The object will become invalid after parsing the next
+	 * command line.
+	 */
 	CommandOptionParsingState *getByShortOpt(char shortOpt);
+
+	/**
+	 * @brief Get or create a CommandOptionParsingState by its shortOpt code
+	 * 
+	 * @param shortOpt The option to get or create
+	 * 
+	 * @param incrementCount true to increment count (the default) in the object
+	 * 
+	 * This version is used internally in parse() to either create a new 
+	 * CommandOptionParsingState object or return an existing one for this
+	 * option. An option is reused for things like -vvv for extra verbose
+	 * output where the option is 'v' and the count is 3.
+	 * 
+	 * Note that the shortOpt is the unique identifier for an option even if the
+	 * longOpt was used. Every option has a unique shortOpt value. If you have
+	 * an option with a longOpt but no user-readable shortOpt, pass a unique
+	 * negative number in shortOpt to uniquely identify it. Negative values
+	 * are not displayed.
+	 * 
+	 * Returns a CommandOptionParsingState * if the option was present in the
+	 * parsed command line. Returns NULL if the option was not included.
+	 * The object returned is owned by this object and it must not be 
+	 * disposed of by your code. This object manages the lifecycle of the
+	 * object. The object will become invalid after parsing the next
+	 * command line.
+	 */
 	CommandOptionParsingState *getOrCreateByShortOpt(char shortOpt, bool incrementCount = true);
 
+	/**
+	 * @brief Get the number of extra args
+	 * 
+	 * The extra args are the ones not associated with a specific option. For example,
+	 * a list of filenames is commonly used as extra args.
+	 * 
+	 * Use the methods like getArgString, getArgInt, getArgFloat, getArgChar 
+	 */
 	size_t getNumExtraArgs() const { return extraArgs.size(); };
+
+	/**
+	 * @brief Returns true if the command line options were parsed successfully
+	 */
 	bool getParseSuccess() const { return parseSuccess; };
+
+	/**
+	 * @brief If parsing fails, an readable message is returned by this method
+	 */
 	const char *getError() const { return err.c_str(); };
 
 protected:
@@ -210,7 +588,7 @@ protected:
  * You may want to use SerialCommandParser (templated version) instead so the buffers can be allocated
  * statically on the heap at compile time and fewer parameters are involved.
  */
-class SerialCommandParserBase : public Print {
+class SerialCommandParserBase : public Print, public CommandArgsParserArray {
 public:
 	enum class StreamType {
 		NONE,
@@ -329,15 +707,29 @@ public:
      */
     virtual void handleConnected(bool isConnected);
 
-
+	/**
+	 * @brief Deletes the character to the left of index
+	 */
     void deleteCharacterLeft(size_t index);
 
+	/**
+	 * @brief Delete the character at index
+	 */
     void deleteCharacterAt(size_t index);
 
+	/**
+	 * @brief Delete the character from index to the end of line
+	 */
     void deleteToEnd(size_t index);
 
+	/**
+	 * @brief Insert character c at index
+	 */
     void insertCharacterAt(size_t index, char c);
 
+	/**
+	 * @brief Append character c to the end of the line
+	 */
     void appendCharacter(char c);
 
 
@@ -379,6 +771,9 @@ public:
 	 */
 	size_t printWithNewLine(const char *str, bool endWithNewLine);
 
+	/**
+	 * @brief Get a pointer to the buffer where the line being typed is stored
+	 */
 	char *getBuffer();
 
 	/**
@@ -388,63 +783,6 @@ public:
 	 */
 	char **getArgsBuffer() { return argsBuffer; };
 
-	/**
-	 * @brief Get the number of arguments
-	 *
-	 * 0 = none, 1 = one argument, ... The index passed to getArgString(), getArgInt(),
-	 */
-	size_t getArgsCount() const { return argsCount; };
-
-	/**
-	 * @brief Get a parsed argument by index
-	 *
-	 * @param index The argument to get (0 = first, 1 = second, ...)
-	 *
-	 * If the index is out of bounds (larger than the largest argument), an empty string is returned.
-	 */
-	const char *getArgString(size_t index) const;
-
-	/**
-	 * @brief Get a parsed argument by as a bool
-	 *
-	 * @param index The argument to get (0 = first, 1 = second, ...)
-	 *
-	 * If the argument begins with 1, T, t, Y, or y, then true is returned. Any other string returns false.
-	 *
-	 * If the index is out of bounds (larger than the largest argument), false is returned.
-	 */
-	bool getArgBool(size_t index) const;
-
-	/**
-	 * @brief Get a parsed argument by as an int
-	 *
-	 * @param index The argument to get (0 = first, 1 = second, ...)
-	 *
-	 * If the value is not a number, then 0 is returned. It uses atoi internally, so rules for that apply.
-	 *
-	 * If the index is out of bounds (larger than the largest argument), 0 is returned.
-	 */
-	int getArgInt(size_t index) const;
-
-	/**
-	 * @brief Get a parsed argument by as a float
-	 *
-	 * @param index The argument to get (0 = first, 1 = second, ...)
-	 *
-	 * If the value is not a number, then 0 is returned. It uses atof internally, so rules for that apply.
-	 *
-	 * If the index is out of bounds (larger than the largest argument), 0 is returned.
-	 */
-	float getArgFloat(size_t index) const;
-
-	/**
-	 * @brief Gets the first character of the argument
-	 *
-	 * @param index The argument to get (0 = first, 1 = second, ...)
-	 *
-	 * @param defaultValue if the argument index does not exist, return this value
-	 */
-	char getArgChar(size_t index, char defaultValue) const;
 
 	/**
 	 * @brief Get the parsing state for command line options

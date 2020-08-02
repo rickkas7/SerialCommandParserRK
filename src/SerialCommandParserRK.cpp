@@ -29,17 +29,14 @@ static Logger log("app.sercmd");
 #define DEBUG_HIGH(x)
 #endif
 
-CommandOption::CommandOption() {
-}
-CommandOption::~CommandOption() {
-}	
-
-
 
 CommandOption::CommandOption(char shortOpt, const char *longOpt, const char *help, bool required, size_t requiredArgs) :
 	shortOpt(shortOpt), longOpt(longOpt), help(help), required(required), requiredArgs(requiredArgs) {
 
 }
+
+CommandOption::~CommandOption() {
+}	
 
 String CommandOption::getName() const {
 	if (longOpt && *longOpt) {
@@ -167,7 +164,85 @@ CommandHandlerInfo *SerialCommandConfig::getCommandHandlerInfo(const char *cmd) 
 	return NULL;
 }
 
-CommandOptionParsingState::CommandOptionParsingState() {
+CommandArgsParserBase::CommandArgsParserBase() {
+}
+
+CommandArgsParserBase::~CommandArgsParserBase() {
+}
+
+bool CommandArgsParserBase::getArgBool(size_t index) const {
+	char c = getArgChar(index, '0');
+
+	return (c == '1' || c == 'T' || c == 't' || c == 'Y' || c == 'y');
+}
+
+int CommandArgsParserBase::getArgInt(size_t index) const {
+	return atoi(getArgString(index));
+}
+
+float CommandArgsParserBase::getArgFloat(size_t index) const {
+	return atof(getArgString(index));
+}
+
+char CommandArgsParserBase::getArgChar(size_t index, char defaultValue) const {
+	const char *s = getArgString(index);
+	if (s[0]) {
+		return s[0];
+	}
+	else {
+		return defaultValue;
+	}
+}
+
+
+CommandArgsParserVector::CommandArgsParserVector(std::vector<String> &vec) : vec(vec) {
+}
+
+CommandArgsParserVector::~CommandArgsParserVector() {
+}
+
+size_t CommandArgsParserVector::getArgCount() const {
+	return vec.size();
+}
+
+/**
+ * @brief Get a parsed argument by index
+ *
+ * @param index The argument to get (0 = first, 1 = second, ...)
+ *
+ * If the index is out of bounds (larger than the largest argument), an empty string is returned.
+ */
+const char *CommandArgsParserVector::getArgString(size_t index) const {
+	if (index < getArgCount()) {
+		return vec[index];
+	}
+	else {
+		return "";
+	}
+}
+
+CommandArgsParserArray::CommandArgsParserArray(char **argsBuffer, size_t *argsCountPtr) : argsBuffer(argsBuffer), argsCountPtr(argsCountPtr) {
+}
+
+CommandArgsParserArray::~CommandArgsParserArray() {
+}
+
+size_t CommandArgsParserArray::getArgCount() const {
+	return *argsCountPtr;
+}
+
+ const char *CommandArgsParserArray::getArgString(size_t index) const {
+	 if (index < getArgCount()) {
+		 return argsBuffer[index];
+	 }
+	 else {
+		 return "";
+	 }
+ }
+
+
+CommandOptionParsingState::CommandOptionParsingState() :
+	CommandArgsParserVector(args) {
 
 }
 
@@ -175,73 +250,8 @@ CommandOptionParsingState::~CommandOptionParsingState() {
 	
 }
 
-const char *CommandOptionParsingState::getArgString(size_t index) const {
-	if (index < args.size()) {
-		return args[index];
-	}
-	else {
-		return "";
-	}
-}
-
-/**
- * @brief Get a parsed argument by as a bool
- *
- * @param index The argument to get (0 = first, 1 = second, ...)
- *
- * If the argument begins with 1, T, t, Y, or y, then true is returned. Any other string returns false.
- *
- * If the index is out of bounds (larger than the largest argument), false is returned.
- */
-bool CommandOptionParsingState::getArgBool(size_t index) const {
-	char c = getArgChar(index, '0');
-
-	return (c == '1' || c == 'T' || c == 't' || c == 'Y' || c == 'y');
-}
-
-/**
- * @brief Get a parsed argument by as an int
- *
- * @param index The argument to get (0 = first, 1 = second, ...)
- *
- * If the value is not a number, then 0 is returned. It uses atoi internally, so rules for that apply.
- *
- * If the index is out of bounds (larger than the largest argument), 0 is returned.
- */
-int CommandOptionParsingState::getArgInt(size_t index) const {
-	return atoi(getArgString(index));
-}
-
-/**
- * @brief Get a parsed argument by as a float
- *
- * @param index The argument to get (0 = first, 1 = second, ...)
- *
- * If the value is not a number, then 0 is returned. It uses atof internally, so rules for that apply.
- *
- * If the index is out of bounds (larger than the largest argument), 0 is returned.
- */
-float CommandOptionParsingState::getArgFloat(size_t index) const {
-	return atof(getArgString(index));
-}
-
-/**
- * @brief Gets the first character of the argument
- *
- * @param index The argument to get (0 = first, 1 = second, ...)
- *
- * @param defaultValue if the argument index does not exist, return this value
- */
-char CommandOptionParsingState::getArgChar(size_t index, char defaultValue) const {
-	if (index < args.size() && args[index].length() > 0) {
-		return args[index].charAt(0);
-	}
-	else {
-		return defaultValue;
-	}
-}
-
-CommandParsingState::CommandParsingState(CommandHandlerInfo *chi) : chi(chi) {
+CommandParsingState::CommandParsingState(CommandHandlerInfo *chi) : 
+	CommandArgsParserVector(extraArgs), chi(chi) {
 
 }
 
@@ -306,6 +316,8 @@ void CommandParsingState::parse(const char * const *argsBuffer, size_t argsCount
 					for(size_t jj = 0; jj < opt->requiredArgs; jj++) {
 						cops->args.push_back(argsBuffer[ii + jj + 1]);
 					}
+					// Skip over required args
+					ii += opt->requiredArgs; 
 				}
 				else {
 					// No required args so add it
@@ -364,6 +376,7 @@ CommandOptionParsingState *CommandParsingState::getOrCreateByShortOpt(char short
 
 
 SerialCommandParserBase::SerialCommandParserBase(char *buffer, size_t bufferSize, char **argsBuffer, size_t argsBufferSize) :
+	CommandArgsParserArray(argsBuffer, &argsCount),
 	buffer(buffer), bufferSize(bufferSize), argsBuffer(argsBuffer), argsBufferSize(argsBufferSize) {
 
 }
@@ -705,47 +718,6 @@ void SerialCommandParserBase::appendCharacter(char c) {
 char *SerialCommandParserBase::getBuffer() {
 	buffer[bufferOffset] = 0;
 	return buffer;
-}
-
-const char *SerialCommandParserBase::getArgString(size_t index) const {
-	if (index < argsCount) {
-		return argsBuffer[index];
-	}
-	else {
-		return "";
-	}
-}
-bool SerialCommandParserBase::getArgBool(size_t index) const {
-	const char *s = getArgString(index);
-	switch(*s) {
-	case '1':
-	case 'Y':
-	case 'y':
-	case 'T':
-	case 't':
-		return true;
-
-	default:
-		return false;
-	}
-}
-
-int SerialCommandParserBase::getArgInt(size_t index) const {
-	return atoi(getArgString(index));
-}
-
-float SerialCommandParserBase::getArgFloat(size_t index) const {
-	return atof(getArgString(index));
-}
-
-char SerialCommandParserBase::getArgChar(size_t index, char defaultValue) const {
-	String s = getArgString(index);
-	if (s.length() > 0) {
-		return s.charAt(0);
-	}
-	else {
-		return defaultValue;
-	}
 }
 
 
