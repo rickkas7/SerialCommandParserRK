@@ -9,6 +9,27 @@
 class SerialCommandParserBase; // Forward declaration
 
 /**
+ * @brief Specifies information about a single option for a command
+ */
+class CommandOption {
+public:
+	CommandOption();
+	virtual ~CommandOption();	
+
+	CommandOption(char shortOpt, const char *longOpt, const char *help, bool required = false, size_t requiredArgs = 0);
+
+	String getName() const;
+
+	// Configuration parameters
+	char shortOpt = 0;
+	const char *longOpt = NULL;
+	const char *help = NULL;
+	bool required = false;
+	size_t requiredArgs = 0;
+};
+
+
+/**
  * @brief Class to hold information about a single command
  *
  * @param cmdNames vector of command names. First is the primary name, subsequent are aliases.
@@ -21,14 +42,116 @@ class SerialCommandParserBase; // Forward declaration
  */
 class CommandHandlerInfo {
 public:
-	CommandHandlerInfo(std::vector<String> cmdNames, const char *helpStr, std::function<void(SerialCommandParserBase *parser)> handler) :
-		cmdNames(cmdNames), helpStr(helpStr), handler(handler) {};
-	virtual ~CommandHandlerInfo() {};
+	CommandHandlerInfo(std::vector<String> cmdNames, const char *helpStr, std::function<void(SerialCommandParserBase *parser)> handler);
+	virtual ~CommandHandlerInfo();
+
+	CommandHandlerInfo &addCommandOption(char shortOpt, const char *longOpt, const char *help, bool required = false, size_t requiredArgs = 0);
+	CommandHandlerInfo &addCommandOption(CommandOption *opt);
+
+	const CommandOption *getByShortOpt(char shortOpt) const;
+
+	const CommandOption *getByLongOpt(const char *longOpt) const;
+
+	bool hasOptions() const { return !cmdOptions.empty(); };
 
 	std::vector<String> cmdNames;
-	String	helpStr;
+	const char *helpStr;
+	std::vector<CommandOption*> cmdOptions;
 	std::function<void(SerialCommandParserBase *parser)> handler;
 };
+
+/**
+ * @brief Class that specifies a single option and possibly args
+ */
+class CommandOptionParsingState {
+public:
+	CommandOptionParsingState();
+	virtual ~CommandOptionParsingState();
+
+	size_t getNumArgs() const { return args.size(); };
+
+	/**
+	 * @brief Get a parsed argument by index
+	 *
+	 * @param index The argument to get (0 = first, 1 = second, ...)
+	 *
+	 * If the index is out of bounds (larger than the largest argument), an empty string is returned.
+	 */
+	const char *getArgString(size_t index) const;
+
+	/**
+	 * @brief Get a parsed argument by as a bool
+	 *
+	 * @param index The argument to get (0 = first, 1 = second, ...)
+	 *
+	 * If the argument begins with 1, T, t, Y, or y, then true is returned. Any other string returns false.
+	 *
+	 * If the index is out of bounds (larger than the largest argument), false is returned.
+	 */
+	bool getArgBool(size_t index) const;
+
+	/**
+	 * @brief Get a parsed argument by as an int
+	 *
+	 * @param index The argument to get (0 = first, 1 = second, ...)
+	 *
+	 * If the value is not a number, then 0 is returned. It uses atoi internally, so rules for that apply.
+	 *
+	 * If the index is out of bounds (larger than the largest argument), 0 is returned.
+	 */
+	int getArgInt(size_t index) const;
+
+	/**
+	 * @brief Get a parsed argument by as a float
+	 *
+	 * @param index The argument to get (0 = first, 1 = second, ...)
+	 *
+	 * If the value is not a number, then 0 is returned. It uses atof internally, so rules for that apply.
+	 *
+	 * If the index is out of bounds (larger than the largest argument), 0 is returned.
+	 */
+	float getArgFloat(size_t index) const;
+
+	/**
+	 * @brief Gets the first character of the argument
+	 *
+	 * @param index The argument to get (0 = first, 1 = second, ...)
+	 *
+	 * @param defaultValue if the argument index does not exist, return this value
+	 */
+	char getArgChar(size_t index, char defaultValue) const;
+
+	char shortOpt = 0;
+	size_t count = 0;
+	std::vector<String> args;
+};
+
+/**
+ * @brief Class that holds the result of parsing a command line with options
+ */
+class CommandParsingState {
+public:
+	CommandParsingState(CommandHandlerInfo *chi);
+	virtual ~CommandParsingState();
+
+	void clear();
+	void parse(const char * const *argsBuffer, size_t argsCount);
+
+	CommandOptionParsingState *getByShortOpt(char shortOpt);
+	CommandOptionParsingState *getOrCreateByShortOpt(char shortOpt, bool incrementCount = true);
+
+	size_t getNumExtraArgs() const { return extraArgs.size(); };
+	bool getParseSuccess() const { return parseSuccess; };
+	const char *getError() const { return err.c_str(); };
+
+protected:
+	CommandHandlerInfo *chi;
+	std::vector<CommandOptionParsingState*> options;
+	std::vector<String> extraArgs;
+	bool parseSuccess = false;
+	String err;
+};
+
 
 class SerialCommandConfig {
 public:
@@ -54,7 +177,7 @@ public:
 	 *
 	 * @param handler The function or lambda to call when the command is entered.
 	 */
-	void addCommandHandler(const char *cmdName, const char *helpStr, std::function<void(SerialCommandParserBase *parser)> handler);
+	CommandHandlerInfo &addCommandHandler(const char *cmdName, const char *helpStr, std::function<void(SerialCommandParserBase *parser)> handler);
 
 	/**
 	 * @brief Add a help command. The default is "help" or "?" but you can override this.
@@ -63,6 +186,12 @@ public:
 	 */
 	void addHelpCommand(const char *helpCommand = "help|?");
 
+	/**
+	 * @brief Get the command handler info structure for a command
+	 * 
+	 * Returns NULL if the command is not known
+	 */
+	CommandHandlerInfo *getCommandHandlerInfo(const char *cmd) const;
 
 	const String &getPrompt() const { return prompt; };
 	const String &getWelcome() const { return welcome; };
@@ -73,7 +202,6 @@ protected:
 	std::vector<CommandHandlerInfo*> commandHandlers;
 	String prompt;
 	String welcome;
-
 };
 
 /**
@@ -164,7 +292,9 @@ public:
 	 */
 	virtual void processLine();
 
-	// Virtual override class Print
+	/**
+	 * @brief Virtual override class Print
+	 */
     virtual size_t write(uint8_t);
 
     /**
@@ -316,6 +446,12 @@ public:
 	 */
 	char getArgChar(size_t index, char defaultValue) const;
 
+	/**
+	 * @brief Get the parsing state for command line options
+	 * 
+	 * Will only be non-null if you've configured command line option parsing for commands.
+	 */
+	CommandParsingState *getParsingState() { return parsingState; };
 
 protected:
 	char *buffer;
@@ -330,6 +466,7 @@ protected:
 	bool usbWasConnected = false;
 #endif /* UNITTEST */
 	SerialCommandConfig *config = 0;
+	CommandParsingState *parsingState = 0;
 };
 
 
