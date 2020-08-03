@@ -785,6 +785,11 @@ public:
 
 
 	/**
+	 * @brief Gets the number of args in argsBuffer
+	 */
+	size_t getArgsCount() { return argsCount; };
+
+	/**
 	 * @brief Get the parsing state for command line options
 	 * 
 	 * Will only be non-null if you've configured command line option parsing for commands.
