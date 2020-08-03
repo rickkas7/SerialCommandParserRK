@@ -30,6 +30,77 @@ static Logger log("app.sercmd");
 #endif
 
 
+CommandOption::CommandOption(char shortOpt, const char *longOpt, const char *help, bool required, size_t requiredArgs) :
+	shortOpt(shortOpt), longOpt(longOpt), help(help), required(required), requiredArgs(requiredArgs) {
+
+}
+
+CommandOption::~CommandOption() {
+}	
+
+String CommandOption::getName() const {
+	if (longOpt && *longOpt) {
+		// Has long option
+		
+		if (shortOpt > ' ') {
+			// Has a readable short option so show both
+			return String::format("--%s (-%c)", longOpt, shortOpt);
+		}
+		else {
+			// Has a secret internal short option, only show long
+			return String::format("--%s", longOpt);
+		}
+	}
+	else {
+		// Only short option
+		return String::format("-%c", shortOpt);
+	}
+}
+
+CommandHandlerInfo::CommandHandlerInfo(std::vector<String> cmdNames, const char *helpStr, std::function<void(SerialCommandParserBase *parser)> handler) :
+	cmdNames(cmdNames), helpStr(helpStr), handler(handler) {
+
+}
+
+CommandHandlerInfo::~CommandHandlerInfo() {
+	while(!cmdOptions.empty()) {
+		delete cmdOptions.back();
+		cmdOptions.pop_back();
+	}
+
+}
+
+
+CommandHandlerInfo &CommandHandlerInfo::addCommandOption(char shortOpt, const char *longOpt, const char *help, bool required, size_t requiredArgs) {
+	// Object added to cmdOptions and delete from the destructor
+	return addCommandOption(new CommandOption(shortOpt, longOpt, help, required, requiredArgs));
+}
+
+CommandHandlerInfo &CommandHandlerInfo::addCommandOption(CommandOption *opt) {
+	cmdOptions.push_back(opt);
+	return *this;
+}
+
+const CommandOption *CommandHandlerInfo::getByShortOpt(char shortOpt) const {
+	for(const CommandOption *opt : cmdOptions) {
+		if (opt->shortOpt == shortOpt) {
+			return opt;
+		}
+	}
+	return NULL;
+}
+
+const CommandOption *CommandHandlerInfo::getByLongOpt(const char *longOpt) const {
+	for(const CommandOption *opt : cmdOptions) {
+		if (opt->longOpt && strcmp(opt->longOpt, longOpt) == 0) {
+			return opt;
+		}
+	}
+	return NULL;
+}
+
+
+
 SerialCommandConfig::SerialCommandConfig() {
 
 }
@@ -41,7 +112,7 @@ SerialCommandConfig::~SerialCommandConfig() {
 	}
 }
 
-void SerialCommandConfig::addCommandHandler(const char *cmdNames, const char *helpStr, std::function<void(SerialCommandParserBase *parser)> handler) {
+CommandHandlerInfo &SerialCommandConfig::addCommandHandler(const char *cmdNames, const char *helpStr, std::function<void(SerialCommandParserBase *parser)> handler) {
 
 	std::vector<String> cmdNamesVector;
 
@@ -68,6 +139,8 @@ void SerialCommandConfig::addCommandHandler(const char *cmdNames, const char *he
 	CommandHandlerInfo *chi = new CommandHandlerInfo(cmdNamesVector, helpStr, handler);
 
 	commandHandlers.push_back(chi);
+
+	return *chi;
 }
 
 void SerialCommandConfig::addHelpCommand(const char *helpCommands) {
@@ -76,13 +149,243 @@ void SerialCommandConfig::addHelpCommand(const char *helpCommands) {
 	});
 }
 
+CommandHandlerInfo *SerialCommandConfig::getCommandHandlerInfo(const char *cmd) const {
+
+	if (!commandHandlers.empty()) {
+		for(CommandHandlerInfo *chi : commandHandlers) {
+			for(String cmdName : chi->cmdNames) {
+				if (strcmp(cmdName, cmd) == 0) {
+					return chi;
+				}
+			}
+		}
+	}
+
+	return NULL;
+}
+
+CommandArgsParserBase::CommandArgsParserBase() {
+}
+
+CommandArgsParserBase::~CommandArgsParserBase() {
+}
+
+bool CommandArgsParserBase::getArgBool(size_t index) const {
+	char c = getArgChar(index, '0');
+
+	return (c == '1' || c == 'T' || c == 't' || c == 'Y' || c == 'y');
+}
+
+int CommandArgsParserBase::getArgInt(size_t index) const {
+	return atoi(getArgString(index));
+}
+
+float CommandArgsParserBase::getArgFloat(size_t index) const {
+	return atof(getArgString(index));
+}
+
+char CommandArgsParserBase::getArgChar(size_t index, char defaultValue) const {
+	const char *s = getArgString(index);
+	if (s[0]) {
+		return s[0];
+	}
+	else {
+		return defaultValue;
+	}
+}
+
+
+CommandArgsParserVector::CommandArgsParserVector(std::vector<String> &vec) : vec(vec) {
+}
+
+CommandArgsParserVector::~CommandArgsParserVector() {
+}
+
+size_t CommandArgsParserVector::getArgCount() const {
+	return vec.size();
+}
+
+/**
+ * @brief Get a parsed argument by index
+ *
+ * @param index The argument to get (0 = first, 1 = second, ...)
+ *
+ * If the index is out of bounds (larger than the largest argument), an empty string is returned.
+ */
+const char *CommandArgsParserVector::getArgString(size_t index) const {
+	if (index < getArgCount()) {
+		return vec[index];
+	}
+	else {
+		return "";
+	}
+}
+
+CommandArgsParserArray::CommandArgsParserArray(char **argsBuffer, size_t *argsCountPtr) : argsBuffer(argsBuffer), argsCountPtr(argsCountPtr) {
+}
+
+CommandArgsParserArray::~CommandArgsParserArray() {
+}
+
+size_t CommandArgsParserArray::getArgCount() const {
+	return *argsCountPtr;
+}
+
+ const char *CommandArgsParserArray::getArgString(size_t index) const {
+	 if (index < getArgCount()) {
+		 return argsBuffer[index];
+	 }
+	 else {
+		 return "";
+	 }
+ }
+
+
+CommandOptionParsingState::CommandOptionParsingState() :
+	CommandArgsParserVector(args) {
+
+}
+
+CommandOptionParsingState::~CommandOptionParsingState() {
+	
+}
+
+CommandParsingState::CommandParsingState(CommandHandlerInfo *chi) : 
+	CommandArgsParserVector(extraArgs), chi(chi) {
+
+}
+
+CommandParsingState::~CommandParsingState() {
+	for(CommandOptionParsingState *optState : options) {
+		delete optState;
+	}
+	options.clear();
+}
+
+void CommandParsingState::clear() {
+	options.clear();
+	extraArgs.clear();
+	parseSuccess = false;
+	err = "";
+}
+
+
+void CommandParsingState::parse(const char * const *argsBuffer, size_t argsCount) {
+	//
+	clear();
+
+	for(size_t ii = 1; ii < argsCount; ii++) {
+		if (argsBuffer[ii][0] == '-') {
+			const CommandOption *opt = NULL;
+
+			if (argsBuffer[ii][1] == '-') {
+				// Long option
+				opt = chi->getByLongOpt(&argsBuffer[ii][2]);
+			}
+			else {
+				// Short option 
+				for(size_t jj = 1; argsBuffer[ii][jj]; jj++) {
+					opt = chi->getByShortOpt(argsBuffer[ii][jj]);
+					if (!argsBuffer[ii][jj + 1]) {
+						// Handle this below in case the last option has optional args
+						break;
+					}
+					if (!opt) {
+						err = String::format("unknown grouped short option -%c", argsBuffer[ii][jj]);
+						DEBUG_HIGH((err.c_str()));
+						return;
+					}
+					// Grouped short options can't have args except for the last arg 
+					// (and even then it's allowed, but weird)
+					getOrCreateByShortOpt(argsBuffer[ii][jj]);
+				}
+			}
+
+			if (opt) {
+				if (opt->requiredArgs > 0) {
+					// Do the required args exist?
+					for(size_t jj = 0; jj < opt->requiredArgs; jj++) {
+						if (((ii + jj + 1) >= argsCount) ||
+						 	(argsBuffer[ii + jj + 1][0] == '-')) {
+							err = String::format("missing required arguments to %s", opt->getName().c_str());
+							DEBUG_HIGH((err.c_str()));
+							return;							
+						}
+					}
+					CommandOptionParsingState *cops = getOrCreateByShortOpt(opt->shortOpt);
+					for(size_t jj = 0; jj < opt->requiredArgs; jj++) {
+						cops->args.push_back(argsBuffer[ii + jj + 1]);
+					}
+					// Skip over required args
+					ii += opt->requiredArgs; 
+				}
+				else {
+					// No required args so add it
+					getOrCreateByShortOpt(opt->shortOpt);
+				}
+			}
+			else {
+				err = String::format("unknown option %s", argsBuffer[ii]);
+				DEBUG_HIGH((err.c_str()));
+				return;
+			}
+		}
+		else {
+			extraArgs.push_back(argsBuffer[ii]);
+		}
+	}
+
+	// Check for missing required arguments
+	for(const CommandOption *opt : chi->cmdOptions) {
+		if (opt->required) {
+			if (!getByShortOpt(opt->shortOpt)) {
+				err = String::format("missing required option %s", opt->getName().c_str());
+				DEBUG_HIGH((err.c_str()));
+				return;
+			}
+		}
+	}
+
+	parseSuccess = true;
+}
+
+CommandOptionParsingState *CommandParsingState::getByShortOpt(char shortOpt) {
+	for(CommandOptionParsingState *optState : options) {
+		if (optState->shortOpt == shortOpt) {
+			return optState;
+		}
+	}
+	return NULL;
+}
+
+
+CommandOptionParsingState *CommandParsingState::getOrCreateByShortOpt(char shortOpt, bool incrementCount) {
+	CommandOptionParsingState *optState = getByShortOpt(shortOpt);
+	if (!optState) {
+		optState = new CommandOptionParsingState();
+		if (optState) {
+			optState->shortOpt = shortOpt;
+			options.push_back(optState);
+		}
+	}
+	if (optState && incrementCount) {
+		optState->count++;
+	}
+	return optState;
+}
+
 
 SerialCommandParserBase::SerialCommandParserBase(char *buffer, size_t bufferSize, char **argsBuffer, size_t argsBufferSize) :
+	CommandArgsParserArray(argsBuffer, &argsCount),
 	buffer(buffer), bufferSize(bufferSize), argsBuffer(argsBuffer), argsBufferSize(argsBufferSize) {
 
 }
 
 SerialCommandParserBase::~SerialCommandParserBase() {
+	if (parsingState) {
+		delete parsingState;
+		parsingState = NULL;
+	}
 }
 
 void SerialCommandParserBase::setup() {
@@ -237,22 +540,32 @@ void SerialCommandParserBase::processLine() {
 		return;
 	}
 
-	bool handled = false;
+	CommandHandlerInfo *chi = config->getCommandHandlerInfo(getArgString(0));
+	if (chi) {
+		if (parsingState) {
+			delete parsingState;
+			parsingState = NULL;
+		}
 
-	if (!config->getCommandHandlers().empty()) {
-		for(CommandHandlerInfo *chi : config->getCommandHandlers()) {
-			for(String cmdName : chi->cmdNames) {
-				if (strcmp(cmdName, getArgString(0)) == 0) {
+		if (chi->hasOptions()) {
+			parsingState = new CommandParsingState(chi);
+			if (parsingState) {
+				parsingState->parse(argsBuffer, argsCount);
+				if (parsingState->getParseSuccess()) {
+					// Success
 					chi->handler(this);
-					handled = true;
-					break;
 				}
 			}
 		}
-		if (!handled) {
-			DEBUG_HIGH(("unknown command '%s'", getArgString(0)));
-			printHelp();
+		else {
+			// No options, call handler always
+			chi->handler(this);
 		}
+
+	}
+	else {
+		DEBUG_HIGH(("unknown command '%s'", getArgString(0)));
+		printHelp();
 	}
 
 	handlePrompt();
@@ -287,7 +600,7 @@ void SerialCommandParserBase::printHelp() {
 			additional += ")";
 		}
 
-		printlnf("%s %s %s", chi->cmdNames[0].c_str(), chi->helpStr.c_str(), additional.c_str());
+		printlnf("%s %s %s", chi->cmdNames[0].c_str(), chi->helpStr, additional.c_str());
 	}
 }
 
@@ -405,47 +718,6 @@ void SerialCommandParserBase::appendCharacter(char c) {
 char *SerialCommandParserBase::getBuffer() {
 	buffer[bufferOffset] = 0;
 	return buffer;
-}
-
-const char *SerialCommandParserBase::getArgString(size_t index) const {
-	if (index < argsCount) {
-		return argsBuffer[index];
-	}
-	else {
-		return "";
-	}
-}
-bool SerialCommandParserBase::getArgBool(size_t index) const {
-	const char *s = getArgString(index);
-	switch(*s) {
-	case '1':
-	case 'Y':
-	case 'y':
-	case 'T':
-	case 't':
-		return true;
-
-	default:
-		return false;
-	}
-}
-
-int SerialCommandParserBase::getArgInt(size_t index) const {
-	return atoi(getArgString(index));
-}
-
-float SerialCommandParserBase::getArgFloat(size_t index) const {
-	return atof(getArgString(index));
-}
-
-char SerialCommandParserBase::getArgChar(size_t index, char defaultValue) const {
-	String s = getArgString(index);
-	if (s.length() > 0) {
-		return s[0];
-	}
-	else {
-		return defaultValue;
-	}
 }
 
 
