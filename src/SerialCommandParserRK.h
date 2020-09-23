@@ -522,6 +522,11 @@ public:
 	 */
 	const char *getError() const { return err.c_str(); };
 
+	/**
+	 * @brief Get the CommandHandlerInfo *
+	 */
+	inline CommandHandlerInfo *getCommandHandlerInfo() { return chi; };
+
 protected:
 	CommandHandlerInfo *chi;
 	std::vector<CommandOptionParsingState*> options;
@@ -765,6 +770,11 @@ public:
 	 * when you enter an invalid command as well.
 	 */
 	void printHelp();
+
+	void printHelpForCommand(const char *cmd);
+
+	void printHelpForCommand(CommandHandlerInfo *chi);
+
 
 	/**
 	 * @brief Print a string with lines terminated with \n expanded to \r\n

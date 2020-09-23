@@ -551,10 +551,7 @@ void SerialCommandParserBase::processLine() {
 			parsingState = new CommandParsingState(chi);
 			if (parsingState) {
 				parsingState->parse(argsBuffer, argsCount);
-				if (parsingState->getParseSuccess()) {
-					// Success
-					chi->handler(this);
-				}
+				chi->handler(this);
 			}
 		}
 		else {
@@ -588,19 +585,33 @@ size_t SerialCommandParserBase::write(uint8_t c) {
 
 void SerialCommandParserBase::printHelp() {
 	for(CommandHandlerInfo *chi : config->getCommandHandlers()) {
-		String additional;
-		if (chi->cmdNames.size() > 1) {
-			additional += "(";
-			for(size_t ii = 1; ii < chi->cmdNames.size(); ii++) {
-				additional += chi->cmdNames[ii];
-				if ((ii + 1) < chi->cmdNames.size()) {
-					additional += ", ";
-				}
-			}
-			additional += ")";
-		}
+		printHelpForCommand(chi);
+	}
+}
 
-		printlnf("%s %s %s", chi->cmdNames[0].c_str(), chi->helpStr, additional.c_str());
+void SerialCommandParserBase::printHelpForCommand(const char *cmd) {
+	CommandHandlerInfo *chi = config->getCommandHandlerInfo(cmd);
+	if (chi) {
+		printHelpForCommand(chi);
+	}
+}
+
+void SerialCommandParserBase::printHelpForCommand(CommandHandlerInfo *chi) {
+	String additional;
+	if (chi->cmdNames.size() > 1) {
+		additional += "(";
+		for(size_t ii = 1; ii < chi->cmdNames.size(); ii++) {
+			additional += chi->cmdNames[ii];
+			if ((ii + 1) < chi->cmdNames.size()) {
+				additional += ", ";
+			}
+		}
+		additional += ")";
+	}
+
+	printlnf("%s %s %s", chi->cmdNames[0].c_str(), chi->helpStr, additional.c_str());
+	for(const CommandOption *opt : chi->cmdOptions) {
+		printlnf("  -%c %s (--%s)", opt->shortOpt, opt->help, opt->longOpt);
 	}
 }
 
