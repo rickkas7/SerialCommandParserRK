@@ -459,6 +459,7 @@ void SerialCommandParserBase::processLine() {
 
 	// Split into space-separated tokens, taking into account backslash escapes, single, and double-quoting
 	char *src = buffer;
+	CommandHandlerInfo *chi = NULL;
 
 	for(argsCount = 0; argsCount < argsBufferSize; ) {
 		// Skip leading white space. This does not need to check for backslash escapes.
@@ -525,6 +526,27 @@ void SerialCommandParserBase::processLine() {
 
 		*dst = 0;
 
+		if (argsCount == 1) {
+			chi = config->getCommandHandlerInfo(getArgString(0));
+			if (chi) {
+				if (chi->rawArgs) {
+					if (!atEnd) {
+						// There are some raw arguments. skip over leading spaces
+						src++;
+						while(*src == ' ' || *src == '\t') {
+							src++;
+						}
+					}
+					if (!*src) {
+						// No arguments
+						break;
+					}
+					argsBuffer[argsCount++] = src;
+					break;
+				}
+			}
+		}
+
 		if (atEnd) {
 			break;
 		}
@@ -540,7 +562,7 @@ void SerialCommandParserBase::processLine() {
 		return;
 	}
 
-	CommandHandlerInfo *chi = config->getCommandHandlerInfo(getArgString(0));
+	chi = config->getCommandHandlerInfo(getArgString(0));
 	if (chi) {
 		if (parsingState) {
 			delete parsingState;

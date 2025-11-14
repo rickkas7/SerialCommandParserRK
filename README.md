@@ -31,6 +31,6 @@ Some future useful features might include:
 
 ## Version History
 
-### 0.0.9 (2025-11-14)
+### 0.0.10 (2025-11-14)
 
 - Fix conflicting definition for `log`.
