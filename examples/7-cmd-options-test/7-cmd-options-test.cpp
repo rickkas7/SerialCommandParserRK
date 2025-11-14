@@ -43,6 +43,9 @@ void setup() {
     .addCommandOption('c', "create", "create a file")
     .addCommandOption('f', "file", "file", false, 1);
 
+	commandParser.addCommandHandler("raw", "test raw args", [](SerialCommandParserBase *) {
+	}).withRawArgs();
+
 	commandParser.addHelpCommand();
 
 	// Connect to Serial and start running
@@ -328,7 +331,30 @@ void runUnitTest() {
 		assertEqualString(cps->getArgString(0), "file1");
 		assertEqualString(cps->getArgString(1), "file2");
 		assertEqualString(cps->getArgString(2), "file3");
+	}
 
+	{
+		commandParser.clear();
+		commandParser.processString("raw");
+		commandParser.processLine();
+
+		assertEqualInt(commandParser.getArgsCount(), 1);
+	}
+	{
+		commandParser.clear();
+		commandParser.processString("raw xxx");
+		commandParser.processLine();
+
+		assertEqualInt(commandParser.getArgsCount(), 2);
+		assertEqualString(commandParser.getArgString(1), "xxx");
+	}
+	{
+		commandParser.clear();
+		commandParser.processString("raw xxx yyy zzz");
+		commandParser.processLine();
+
+		assertEqualInt(commandParser.getArgsCount(), 2);
+		assertEqualString(commandParser.getArgString(1), "xxx yyy zzz");
 	}
 
 

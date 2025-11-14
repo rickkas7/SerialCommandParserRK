@@ -151,6 +151,12 @@ public:
 	 */
 	CommandHandlerInfo &addCommandOption(CommandOption *opt);
 
+
+	/**
+	 * @brief Enable raw args mode for this command. All arguments are in the first arg rather than splitting them out.
+	 */
+	CommandHandlerInfo &withRawArgs(bool value = true) { rawArgs = true; return *this; };
+
 	/**
 	 * @brief Get the CommandOption by shortOpt
 	 * 
@@ -188,6 +194,11 @@ public:
 	 * is not copied! If you are dynamically generating them, store them on the heap.
 	 */
 	const char *helpStr;
+
+	/**
+	 * @param Raw arguments mode - all args are saved in the first argument 
+	 */
+	bool rawArgs = false;
 
 	/**
 	 * @brief Vector of CommandOption objects for the objects for this command
