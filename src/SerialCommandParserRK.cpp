@@ -16,15 +16,15 @@
 
 // Don't change these, just change the debugging level above
 #if SERIAL_COMMAND_DEBUG_LEVEL >= 1
-static Logger log("app.sercmd");
+static Logger _log("app.sercmd");
 
-#define DEBUG_NORMAL(x) log.info x
+#define DEBUG_NORMAL(x) _log.info x
 #else
 #define DEBUG_NORMAL(x)
 #endif
 
 #if SERIAL_COMMAND_DEBUG_LEVEL >= 2
-#define DEBUG_HIGH(x) log.info x
+#define DEBUG_HIGH(x) _log.info x
 #else
 #define DEBUG_HIGH(x)
 #endif
@@ -818,7 +818,7 @@ void SerialCommandEditorBase::loop() {
 
 
 void SerialCommandEditorBase::filterChar(char c) {
-	// Log.trace("char %c %d", c, c);
+	// _log.trace("char %c %d", c, c);
 	lastKeyMillis = millis();
 
 	promptRendered = false;

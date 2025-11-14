@@ -29,3 +29,8 @@ Some future useful features might include:
 
 - Command option processing
 
+## Version History
+
+### 0.0.9 (2025-11-14)
+
+- Fix conflicting definition for `log`.

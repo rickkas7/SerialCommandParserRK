@@ -904,7 +904,7 @@ public:
 
 	void loop();
 
-	void filterChar(char c);
+	virtual void filterChar(char c);
 
 	void handleSpecialKey(char key);
 
